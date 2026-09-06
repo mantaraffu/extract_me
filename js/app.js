@@ -57,7 +57,7 @@ async function listCams() {
       ui.source.appendChild(o);
     });
     const f = document.createElement("option");
-    f.value = "__file"; f.textContent = "file video / immagine...";
+    f.value = "__file"; f.textContent = "video / image file...";
     ui.source.appendChild(f);
     if ([...ui.source.options].some(o => o.value === cur)) ui.source.value = cur;
   } catch (e) { console.warn(e); }
@@ -71,7 +71,7 @@ function stopSource() {
 
 async function openWebcam(deviceId) {
   stopSource();
-  setStatus("apro la webcam...");
+  setStatus("opening the webcam...");
   const constraints = { video: { width: { ideal: 1280 }, height: { ideal: 720 },
                                  ...(deviceId ? { deviceId: { exact: deviceId } } : {}) }, audio: false };
   const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -93,7 +93,7 @@ async function openFile(file) {
     state.source = { kind: "image", el: img, width: img.naturalWidth, height: img.naturalHeight };
     ui.mirror.checked = false;
     await state.vision.setMode("IMAGE");
-    setStatus(`immagine ${img.naturalWidth}x${img.naturalHeight}`);
+    setStatus(`image ${img.naturalWidth}x${img.naturalHeight}`);
     return;
   }
   video.srcObject = null;
@@ -134,7 +134,7 @@ async function syncModules() {
   }
   state.smoother.reset();
   state.vitPreds = null;
-  if (/^carico/.test(ui.status.textContent)) setStatus("pronto");
+  if (/^loading/.test(ui.status.textContent)) setStatus("ready");
 }
 
 // ---------- loop ----------
@@ -265,7 +265,7 @@ function render(src, { face, blink, preds, rect, nowS }) {
     ctx.fillStyle = "#fff";
     for (const p of Object.values(state.hands.palms)) { ctx.beginPath(); ctx.arc(mx(p.x), p.y, 5, 0, Math.PI * 2); ctx.fill(); }
     const ri = state.hands.resetIn(nowS);
-    const txt = `mani=${Object.keys(state.hands.palms).length}${rect ? "  rect" : ""}${state.hands.hold ? " (bloccato)" : ""}${ri !== null ? `  reset in ${ri.toFixed(1)}s` : ""}`;
+    const txt = `hands=${Object.keys(state.hands.palms).length}${rect ? "  rect" : ""}${state.hands.hold ? " (locked)" : ""}${ri !== null ? `  reset in ${ri.toFixed(1)}s` : ""}`;
     label(txt, W - ctx.measureText(txt).width - 20, H - 10, "#000", "#fff");
   }
   label(`${state.fps.toFixed(1)} fps  faces=${face ? 1 : 0}`, 10, 30, "rgba(0,0,0,.6)", "#fff");
@@ -293,10 +293,10 @@ function publish({ face, blink, expr, preds, rect, hands }) {
 }
 
 function renderStats(s) {
-  const lines = [`${s.fps.toFixed(1)} fps`, `volto: ${s.face ? "sì" : "no"}`];
-  if (s.valence !== null) lines.push(`valenza ${s.valence.toFixed(2)}  attivazione ${s.arousal.toFixed(2)}`);
+  const lines = [`${s.fps.toFixed(1)} fps`, `face: ${s.face ? "yes" : "no"}`];
+  if (s.valence !== null) lines.push(`valence ${s.valence.toFixed(2)}  arousal ${s.arousal.toFixed(2)}`);
   if (s.blink) lines.push(`blink: ${s.blink.count} (${s.blink.perMin.toFixed(0)}/min)`);
-  if (state.hands) lines.push(`mani: ${s.hands}`);
+  if (state.hands) lines.push(`hands: ${s.hands}`);
   ui.stats.textContent = lines.join("\n");
   const probs = s.probs ? Object.fromEntries(s.probs.map(p => [p.label, p.score])) : {};
   ui.bars.innerHTML = LABELS.map(l => {
@@ -308,7 +308,7 @@ function renderStats(s) {
 // ---------- events ----------
 
 async function onControls() {
-  try { await syncModules(); } catch (e) { setStatus(`errore: ${e.message}`); console.error(e); }
+  try { await syncModules(); } catch (e) { setStatus(`error: ${e.message}`); console.error(e); }
   state.dirty = true;
 }
 
@@ -351,16 +351,16 @@ document.addEventListener("drop", async e => {
   state.running = true;
   requestAnimationFrame(tick);
   await listCams();
-  try { await syncModules(); } catch (e) { setStatus(`errore: ${e.message}`); console.error(e); return; }
+  try { await syncModules(); } catch (e) { setStatus(`error: ${e.message}`); console.error(e); return; }
   const params = new URLSearchParams(location.search);
   if (params.get("image")) {
     // ?image=url : test image without a camera (e.g. ?image=test.jpg)
     try {
       const blob = await (await fetch(params.get("image"))).blob();
       await openFile(new File([blob], params.get("image"), { type: blob.type || "image/jpeg" }));
-    } catch (e) { setStatus(`immagine: ${e.message}`); }
+    } catch (e) { setStatus(`image: ${e.message}`); }
     state.dirty = true;
   } else if (params.get("source") !== "file") {
-    try { await openWebcam(); } catch (e) { setStatus(`webcam non disponibile (${e.message}): scegli un file`); }
+    try { await openWebcam(); } catch (e) { setStatus(`webcam unavailable (${e.message}): pick a file`); }
   }
 })();

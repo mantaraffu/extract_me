@@ -19,7 +19,7 @@ export class EmotionViT {
 
   async load(onStatus = () => {}) {
     if (this.pipe) return;
-    onStatus("carico transformers.js...");
+    onStatus("loading transformers.js...");
     const tf = await import(TF_URL);
     this._tf = tf;
     const forced = new URLSearchParams(location.search).get("device");
@@ -29,12 +29,12 @@ export class EmotionViT {
     for (const [device, dtype] of attempts) {
       try {
         const size = dtype === "fp32" ? "~350MB" : "~90MB";
-        onStatus(`carico ViT emotion su ${device} (primo avvio: ${size})...`);
+        onStatus(`loading ViT emotion on ${device} (first run: ${size})...`);
         const seen = {};
         const progress_callback = p => {
           if (p.status === "progress" && p.file?.endsWith(".onnx")) {
             const pct = Math.round(p.progress || 0);
-            if (seen[p.file] !== pct) { seen[p.file] = pct; onStatus(`scarico ViT ${dtype} su ${device}: ${pct}%`); }
+            if (seen[p.file] !== pct) { seen[p.file] = pct; onStatus(`downloading ViT ${dtype} for ${device}: ${pct}%`); }
           }
         };
         const p = await tf.pipeline("image-classification", MODEL, { device, dtype, progress_callback });
@@ -42,14 +42,14 @@ export class EmotionViT {
         await p(await tf.RawImage.fromCanvas(this._blank()), { top_k: 1 });
         this.pipe = p;
         this.device = device;
-        onStatus(`ViT emotion pronto su ${device}`);
+        onStatus(`ViT emotion ready on ${device}`);
         return;
       } catch (e) {
         lastErr = e;
         console.warn(`[vit] ${device} failed:`, e);
       }
     }
-    throw new Error(`ViT non caricabile: ${lastErr?.message || lastErr}`);
+    throw new Error(`ViT could not be loaded: ${lastErr?.message || lastErr}`);
   }
 
   _blank() {

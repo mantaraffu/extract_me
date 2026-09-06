@@ -33,7 +33,7 @@ export class Vision {
 
   async loadFace(onStatus = () => {}) {
     if (this.face) return this.face;
-    onStatus("carico FaceLandmarker...");
+    onStatus("loading FaceLandmarker...");
     const { FaceLandmarker } = await mp();
     this.face = await FaceLandmarker.createFromOptions(await fileset(), {
       baseOptions: { modelAssetPath: FACE_MODEL, delegate: this.delegate },
@@ -49,7 +49,7 @@ export class Vision {
 
   async loadHand(onStatus = () => {}) {
     if (this.hand) return this.hand;
-    onStatus("carico HandLandmarker...");
+    onStatus("loading HandLandmarker...");
     const { HandLandmarker } = await mp();
     this.hand = await HandLandmarker.createFromOptions(await fileset(), {
       baseOptions: { modelAssetPath: HAND_MODEL, delegate: this.delegate },
