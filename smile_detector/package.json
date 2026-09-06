@@ -1,7 +1,7 @@
 {
-  "name": "extract_me",
+  "name": "smile_detector",
   "version": "0.1.0",
-  "description": "Face, emotion, blink and hand tracking entirely in the browser (MediaPipe Tasks + transformers.js)",
+  "description": "Face, emotion, blink and hand tracking in the browser, with a positive-emotion stopwatch and adaptive zoom for distant faces",
   "type": "module",
   "private": true,
   "scripts": {

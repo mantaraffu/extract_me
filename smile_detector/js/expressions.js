@@ -42,5 +42,7 @@ export function expressionsFromBlendshapes(bs) {
                       .sort((a, b) => b.score - a.score);
   const valence = Math.max(-1, Math.min(1, smile - frown - 0.5 * browDown - 0.5 * noseSneer));
   const arousal = clamp01(0.4 * jawOpen + 0.3 * eyeWide + 0.2 * browInnerUp + 0.1 * browDown);
-  return { preds, valence, arousal };
+  // `smile` is returned raw: it is what drives happy, and watching it next to
+  // the resulting scores tells a weak signal apart from a crushed one.
+  return { preds, valence, arousal, smile };
 }

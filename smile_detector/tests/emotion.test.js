@@ -51,3 +51,18 @@ test("blendshape: normalized distribution", () => {
   assert.ok(Math.abs(sum - 1) < 1e-9);
   assert.equal(preds[0].label, "angry");
 });
+
+test("blendshape: exposes the raw smile that drives happy", () => {
+  const r = expressionsFromBlendshapes({ mouthSmileLeft: 0.2, mouthSmileRight: 0.1 });
+  assert.ok(Math.abs(r.smile - 0.15) < 1e-9);
+});
+
+test("blendshape: a weak smile is crushed by the neutral penalty", () => {
+  // the distant-face case: the smile signal is present but neutral still wins
+  const weak = expressionsFromBlendshapes({ mouthSmileLeft: 0.15, mouthSmileRight: 0.15 });
+  assert.ok(weak.smile > 0);
+  assert.equal(weak.preds[0].label, "neutral");
+  // the same smile up close wins comfortably
+  const near = expressionsFromBlendshapes({ mouthSmileLeft: 0.8, mouthSmileRight: 0.8 });
+  assert.equal(near.preds[0].label, "happy");
+});

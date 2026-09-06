@@ -41,6 +41,12 @@
   </fieldset>
 
   <fieldset>
+    <legend><label><input id="zoom" type="checkbox" checked> adaptive zoom (distant faces)</label></legend>
+    <p class="hint">crops the frame for the detector when the face is lost: past
+    ~2 m the face is too small a fraction of the frame to be found.</p>
+  </fieldset>
+
+  <fieldset>
     <legend>emotion</legend>
     <label>source
       <select id="emotion">
@@ -50,12 +56,13 @@
       </select>
     </label>
     <label>ViT every <input id="vitEvery" type="number" step="1" min="1" value="3"> frames</label>
+    <label><input id="posTimer" type="checkbox" checked> stopwatch of positive time</label>
   </fieldset>
 
   <pre id="stats"></pre>
   <div id="bars"></div>
 
-  <p class="hint">keys: <b>h</b> panel · <b>o</b> overlay · <b>m</b> mirror · <b>f</b> fullscreen · <b>r</b> reset rect<br>
+  <p class="hint">keys: <b>h</b> panel · <b>o</b> overlay · <b>m</b> mirror · <b>f</b> fullscreen · <b>r</b> reset rect · <b>t</b> reset stopwatch<br>
   drag a video or an image onto the page to use it as the source.<br>
   per-frame state in <code>window.emotionState</code> and the <code>emotionscript</code> event.</p>
 </aside>

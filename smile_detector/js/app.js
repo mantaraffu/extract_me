@@ -10,6 +10,11 @@ import { BlinkCounter, LEFT_EYE, RIGHT_EYE } from "./blink.js";
 import { HandsTracker } from "./hands.js";
 import { EmotionSmoother } from "./smoother.js";
 import { expressionsFromBlendshapes, LABELS } from "./expressions.js";
+import { PositiveTimer, formatDuration } from "./positive_timer.js";
+import { ZoomTracker } from "./zoom.js";
+
+/** The emotion labels that make the positive-time stopwatch run. */
+const POSITIVE_LABELS = new Set(["happy"]);
 
 const $ = id => document.getElementById(id);
 const ui = {
@@ -18,6 +23,7 @@ const ui = {
   blink: $("blink"), blinkMode: $("blinkMode"), blinkThresh: $("blinkThresh"),
   hands: $("hands"), handsHold: $("handsHold"), handsResetOn: $("handsResetOn"), handsReset: $("handsReset"),
   emotion: $("emotion"), vitEvery: $("vitEvery"),
+  posTimer: $("posTimer"), zoom: $("zoom"),
   stats: $("stats"), bars: $("bars"),
 };
 const ctx = ui.canvas.getContext("2d");
@@ -31,6 +37,9 @@ const state = {
   blinker: null,
   hands: null,
   smoother: new EmotionSmoother(),
+  positive: new PositiveTimer(),
+  zoom: new ZoomTracker(),
+  zoomRoi: null,     // region fed to the face detector next frame, null = full frame
   vit: null,
   vitPreds: null,
   frame: 0,
@@ -64,6 +73,8 @@ async function listCams() {
 }
 
 function stopSource() {
+  state.zoom.reset();
+  state.zoomRoi = null;
   if (state.source?.kind === "webcam") video.srcObject?.getTracks().forEach(t => t.stop());
   if (state.source?.kind === "video") { video.pause(); URL.revokeObjectURL(video.src); }
   state.source = null;
@@ -160,6 +171,7 @@ function processFrame(src) {
   const det = state.vision.detect(el, W, H, {
     wantFace: ui.blink.checked || ui.emotion.value !== "off",
     wantHands: ui.hands.checked,
+    faceRoi: state.zoomRoi,
   });
 
   // --- blink + expressions on the closest face ---
@@ -201,6 +213,15 @@ function processFrame(src) {
     rect = state.hands.feed(palms, nowS);
   }
 
+  // --- adaptive zoom: this frame's detection picks the region for the next ---
+  if (ui.zoom.checked) state.zoomRoi = state.zoom.feed(face?.box || null, nowS, W, H);
+  else { state.zoomRoi = null; if (state.zoom.state !== "full") state.zoom.reset(); }
+
+  // --- positive-emotion stopwatch ---
+  // preds is null with no face and with emotion off, so the clock pauses on its own
+  const positive = !!preds && POSITIVE_LABELS.has(preds[0].label);
+  state.positive.feed(positive, nowS);
+
   // --- fps ---
   const t = performance.now();
   if (state.lastT !== null) {
@@ -235,6 +256,9 @@ function render(src, { face, blink, preds, rect, nowS }) {
   }
   ctx.restore();
 
+  // main indicator: not debug, so the overlay toggle does not hide it
+  if (ui.posTimer.checked) drawPositiveTimer(W, H);
+
   if (!ui.overlay.checked) return;
   ctx.lineWidth = 2;
   ctx.font = "16px system-ui, sans-serif";
@@ -256,6 +280,15 @@ function render(src, { face, blink, preds, rect, nowS }) {
       }
     }
   }
+  if (state.zoomRoi) {
+    // the region actually handed to the detector, so the zoom is never a mystery
+    const z = state.zoomRoi;
+    const zx = Math.min(mx(z.x), mx(z.x + z.w));
+    ctx.strokeStyle = "#ff0"; ctx.lineWidth = 2; ctx.setLineDash([9, 7]);
+    ctx.strokeRect(zx, z.y, z.w, z.h);
+    ctx.setLineDash([]);
+    label(`zoom ${state.zoom.state} ${(W / z.w).toFixed(1)}x`, zx, Math.max(24, z.y), "#ff0", "#000");
+  }
   if (blink) {
     const name = blink.mode === "blend" ? "blink" : "EAR";
     label(`${name} ${blink.level.toFixed(2)}  blink #${blink.blinks} (${blink.perMin.toFixed(0)}/min)${blink.blinked ? "  *BLINK*" : ""}`,
@@ -271,6 +304,42 @@ function render(src, { face, blink, preds, rect, nowS }) {
   label(`${state.fps.toFixed(1)} fps  faces=${face ? 1 : 0}`, 10, 30, "rgba(0,0,0,.6)", "#fff");
 }
 
+/**
+ * Cumulative positive time, top centre, big enough to read across a room.
+ * Green with a dot while it runs, dimmed grey while it is stopped: the state
+ * is legible at a glance without reading the digits.
+ */
+function drawPositiveTimer(W, H) {
+  const { seconds, running } = state.positive;
+  const txt = formatDuration(seconds);
+  const size = Math.max(18, Math.round(H / 10));
+  const green = "#0f0", grey = "rgba(255,255,255,.5)";
+
+  ctx.save();
+  ctx.font = `600 ${size}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  const padX = size * 0.45, padY = size * 0.3, r = size * 0.16;
+  const gap = running ? r * 3 : 0;
+  const tw = ctx.measureText(txt).width;
+  const bw = tw + gap + padX * 2, bh = size + padY * 2;
+  const bx = (W - bw) / 2, by = size * 0.35, cy = by + bh / 2;
+
+  ctx.fillStyle = "rgba(0,0,0,.55)";
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, bh * 0.26);
+  else ctx.rect(bx, by, bw, bh);
+  ctx.fill();
+
+  if (running) {
+    ctx.fillStyle = green;
+    ctx.beginPath(); ctx.arc(bx + padX + r, cy, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = running ? green : grey;
+  ctx.fillText(txt, bx + padX + gap, cy + size * 0.04);
+  ctx.restore();
+}
+
 function label(txt, x, y, bg, fg) {
   const w = ctx.measureText(txt).width + 8;
   ctx.fillStyle = bg; ctx.fillRect(x, y - 22, w, 22);
@@ -283,8 +352,9 @@ function publish({ face, blink, expr, preds, rect, hands }) {
   const s = {
     t: Date.now(), fps: state.fps, face: !!face,
     box: face?.box || null, emotion: preds?.[0] || null, probs: preds || null,
-    valence: expr?.valence ?? null, arousal: expr?.arousal ?? null,
+    valence: expr?.valence ?? null, arousal: expr?.arousal ?? null, smile: expr?.smile ?? null,
     blink: blink ? { level: blink.level, closed: blink.closed, blinked: blink.blinked, count: blink.blinks, perMin: blink.perMin } : null,
+    positiveTime: { seconds: state.positive.seconds, running: state.positive.running },
     hands, palms: state.hands?.palms || {}, rect,
   };
   window.emotionState = s;
@@ -293,12 +363,19 @@ function publish({ face, blink, expr, preds, rect, hands }) {
 }
 
 function renderStats(s) {
-  const lines = [`${s.fps.toFixed(1)} fps`, `face: ${s.face ? "yes" : "no"}`];
+  const probs = s.probs ? Object.fromEntries(s.probs.map(p => [p.label, p.score])) : {};
+  // face size in px next to the raw smile is the distance diagnostic: it says
+  // whether a far face is lost by the detector or just crushed by the formula
+  const box = s.box ? `  box ${Math.round(s.box.x2 - s.box.x1)}x${Math.round(s.box.y2 - s.box.y1)} px` : "";
+  const lines = [`${s.fps.toFixed(1)} fps`, `face: ${s.face ? "yes" : "no"}${box}`];
+  if (s.smile !== null)
+    lines.push(`smile ${s.smile.toFixed(3)} -> happy ${(probs.happy ?? 0).toFixed(2)} / neutral ${(probs.neutral ?? 0).toFixed(2)}`);
+  if (ui.zoom.checked) lines.push(`zoom: ${state.zoom.state}`);
   if (s.valence !== null) lines.push(`valence ${s.valence.toFixed(2)}  arousal ${s.arousal.toFixed(2)}`);
   if (s.blink) lines.push(`blink: ${s.blink.count} (${s.blink.perMin.toFixed(0)}/min)`);
+  lines.push(`positive: ${formatDuration(s.positiveTime.seconds)} ${s.positiveTime.running ? "(running)" : "(stopped)"}`);
   if (state.hands) lines.push(`hands: ${s.hands}`);
   ui.stats.textContent = lines.join("\n");
-  const probs = s.probs ? Object.fromEntries(s.probs.map(p => [p.label, p.score])) : {};
   ui.bars.innerHTML = LABELS.map(l => {
     const v = probs[l] ?? 0;
     return `<div class="bar"><span>${l}</span><i style="width:${(v * 100).toFixed(0)}%"></i><b>${v.toFixed(2)}</b></div>`;
@@ -327,6 +404,8 @@ for (const el of [ui.blink, ui.blinkMode, ui.blinkThresh, ui.hands, ui.handsHold
   el.addEventListener("change", onControls);
 ui.mirror.addEventListener("change", () => { state.dirty = true; });
 ui.overlay.addEventListener("change", () => { state.dirty = true; });
+ui.posTimer.addEventListener("change", () => { state.dirty = true; });
+ui.zoom.addEventListener("change", () => { state.zoom.reset(); state.zoomRoi = null; state.dirty = true; });
 
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
@@ -334,6 +413,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "o") { ui.overlay.checked = !ui.overlay.checked; state.dirty = true; }
   if (e.key === "m") { ui.mirror.checked = !ui.mirror.checked; state.dirty = true; }
   if (e.key === "r") { state.hands?.reset(performance.now() / 1000); state.dirty = true; }
+  if (e.key === "t") { state.positive.reset(performance.now() / 1000); state.dirty = true; }
   if (e.key === "f") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
 });
 
