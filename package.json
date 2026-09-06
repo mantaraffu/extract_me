@@ -1,0 +1,11 @@
+{
+  "name": "extract_me",
+  "version": "0.1.0",
+  "description": "Face, emotion, blink and hand tracking entirely in the browser (MediaPipe Tasks + transformers.js)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "serve": "python3 serve.py 8000"
+  }
+}
