@@ -169,3 +169,55 @@ test("no speaker: the verdict still comes back", () => {
   const v = run(c, 0, 120, 0.5);
   assert.equal(v.length, 1);
 });
+
+// --- browserSpeaker on a fake Web Speech API ---
+
+function fakeSpeech() {
+  const calls = { spoken: [], cancels: 0 };
+  globalThis.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+  globalThis.speechSynthesis = {
+    speaking: false, pending: false,
+    getVoices: () => [{ name: "It", lang: "it-IT" }, { name: "Sam", lang: "en-US" }],
+    cancel() { calls.cancels++; },
+    speak(u) { calls.spoken.push(u); },
+  };
+  return calls;
+}
+function dropFakeSpeech() { delete globalThis.SpeechSynthesisUtterance; delete globalThis.speechSynthesis; }
+
+test("browserSpeaker: null without the API, English voice with it", async () => {
+  const { browserSpeaker } = await import("../js/coach.js");
+  dropFakeSpeech();
+  assert.equal(browserSpeaker(), null);
+  const calls = fakeSpeech();
+  try {
+    const speak = browserSpeaker();
+    speak("hi");
+    assert.equal(calls.spoken.length, 1);
+    assert.equal(calls.spoken[0].voice.name, "Sam");
+    assert.equal(calls.spoken[0].lang, "en-US");
+    assert.equal(calls.cancels, 0);       // nothing was being said: no cancel
+    speechSynthesis.speaking = true;
+    speak("again");
+    assert.equal(calls.cancels, 1);       // cut the previous line short
+  } finally { dropFakeSpeech(); }
+});
+
+test("browserSpeaker: reports blocked, error and speaking; ignores its own interruptions", async () => {
+  const { browserSpeaker } = await import("../js/coach.js");
+  const calls = fakeSpeech();
+  try {
+    const seen = [];
+    const speak = browserSpeaker({ onState: (st, text, detail) => seen.push([st, text, detail]) });
+    speak("one");
+    const u = calls.spoken[0];
+    u.onerror({ error: "not-allowed" });
+    u.onerror({ error: "interrupted" });
+    u.onerror({ error: "synthesis-failed" });
+    u.onstart(); u.onend();
+    assert.deepEqual(seen, [
+      ["blocked", "one", "not-allowed"], ["error", "one", "synthesis-failed"],
+      ["speaking", "one", undefined], ["done", "one", undefined],
+    ]);
+  } finally { dropFakeSpeech(); }
+});

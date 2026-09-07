@@ -128,19 +128,33 @@ export class SmileCoach {
 }
 
 /**
- * `speak` callback on the Web Speech API. Prefers an English voice, cancels
- * whatever is still being said so verdicts never queue up. Returns null where
- * speech synthesis is not available.
+ * `speak` callback on the Web Speech API. Prefers an English voice and cuts
+ * short whatever is still being said, so verdicts never queue up. Returns
+ * null where speech synthesis is not available.
+ *
+ * `onState(state, text, detail)` reports "speaking", "done", "blocked" (the
+ * browser refused to speak: Chrome wants a click on the page first) or
+ * "error". Speech fails silently otherwise, which is the worst way to fail.
  */
-export function browserSpeaker({ lang = "en", rate = 1 } = {}) {
+export function browserSpeaker({ lang = "en", rate = 1, onState = null } = {}) {
   if (typeof speechSynthesis === "undefined" || typeof SpeechSynthesisUtterance === "undefined") return null;
+  let current = null;   // held on purpose: Firefox drops an utterance that gets garbage-collected mid-speech
   return text => {
     const u = new SpeechSynthesisUtterance(text);
     const voice = speechSynthesis.getVoices().find(v => v.lang.toLowerCase().startsWith(lang));
     if (voice) u.voice = voice;
     u.lang = voice?.lang || lang;
     u.rate = rate;
-    speechSynthesis.cancel();
+    u.onstart = () => onState?.("speaking", text);
+    u.onend = () => onState?.("done", text);
+    u.onerror = e => {
+      // cutting the previous line short is not an error worth reporting
+      if (e.error === "interrupted" || e.error === "canceled") return;
+      onState?.(e.error === "not-allowed" ? "blocked" : "error", text, e.error);
+    };
+    current = u;
+    if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
     speechSynthesis.speak(u);
+    return current;
   };
 }

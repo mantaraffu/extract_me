@@ -85,9 +85,11 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   threshold. The share is over the time a face was visible, not wall-clock
   time, and a window with less than 10 s of face is skipped in silence, so an
   empty room is never scolded. Speech is the browser's Web Speech API with an
-  English system voice; Chrome only speaks after a click on the page, which
-  ticking the checkbox or pressing "test voice" provides. Both lists live at
-  the top of `coach.js`. The running share, the previous one and the countdown
+  English system voice. Chrome only speaks after a click on the page: a line
+  it refuses shows "voice blocked" in the status line and is said at the next
+  click anywhere. The status line also echoes each line as it is spoken, so a
+  silent coach is never a mystery. The panel settings, including the on/off
+  switch, survive a reload. Both lists live at the top of `coach.js`. The running share, the previous one and the countdown
   to the next verdict sit at the bottom of the canvas; the spoken line stays
   there as a caption for 5 s. Timings and threshold are in the panel; `c`
   forces a verdict now.

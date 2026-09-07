@@ -48,6 +48,7 @@ const state = {
   zoomRoi: null,     // region fed to the face detector next frame, null = full frame
   coach: null,       // SmileCoach while the voice coach is on
   speak: null,       // speak(text) on the Web Speech API, null where unavailable
+  blockedText: null, // a line the browser refused to speak, retried on the next click
   vit: null,
   vitPreds: null,
   frame: 0,
@@ -498,16 +499,50 @@ ui.posTimer.addEventListener("change", () => { state.dirty = true; });
 ui.sessionClock.addEventListener("change", () => { state.dirty = true; });
 ui.zoom.addEventListener("change", () => { state.zoom.reset(); state.zoomRoi = null; state.dirty = true; });
 
+/** Panel settings of the coach, kept across reloads. */
+const COACH_KEY = "smile_detector.coach";
+function saveCoachSettings() {
+  try {
+    localStorage.setItem(COACH_KEY, JSON.stringify({
+      on: ui.coach.checked, first: ui.coachFirst.value, every: ui.coachEvery.value, thresh: ui.coachThresh.value,
+    }));
+  } catch {}
+}
+function loadCoachSettings() {
+  try {
+    const c = JSON.parse(localStorage.getItem(COACH_KEY) || "null");
+    if (!c) return;
+    ui.coach.checked = !!c.on;
+    if (c.first) ui.coachFirst.value = c.first;
+    if (c.every) ui.coachEvery.value = c.every;
+    if (c.thresh) ui.coachThresh.value = c.thresh;
+  } catch {}
+}
+
+/** Speech feedback in the status line; a blocked line is retried on the next click. */
+function onVoiceState(st, text, detail) {
+  if (st === "speaking") { state.blockedText = null; setStatus(`voice: "${text}"`); }
+  else if (st === "blocked") { state.blockedText = text; setStatus("voice blocked by the browser: click anywhere on the page to enable it"); }
+  else if (st === "error") setStatus(`voice error: ${detail}`);
+  console.log(`[voice] ${st}${detail ? ` (${detail})` : ""}: "${text}"`);
+}
+function ensureSpeaker() {
+  if (!state.speak) state.speak = browserSpeaker({ onState: onVoiceState });
+  return state.speak;
+}
+document.addEventListener("click", () => {
+  // the click is the user activation the browser wanted: say the line it refused
+  if (state.blockedText && state.speak) { const t = state.blockedText; state.blockedText = null; state.speak(t); }
+}, true);
+
 /**
  * (Re)build the coach from the panel. Any change restarts it: the windows
  * only make sense from the moment the settings were chosen.
  */
 function syncCoach() {
+  saveCoachSettings();
   if (!ui.coach.checked) { state.coach = null; state.dirty = true; return; }
-  if (!state.speak) {
-    state.speak = browserSpeaker();
-    if (!state.speak) setStatus("speech synthesis not available in this browser: the coach runs silently");
-  }
+  if (!ensureSpeaker()) setStatus("speech synthesis not available in this browser: the coach runs silently");
   state.coach = new SmileCoach({
     firstS: Math.max(5, parseFloat(ui.coachFirst.value) || 120),
     everyS: Math.max(5, parseFloat(ui.coachEvery.value) || 60),
@@ -519,9 +554,7 @@ function syncCoach() {
 }
 for (const el of [ui.coach, ui.coachFirst, ui.coachEvery, ui.coachThresh]) el.addEventListener("change", syncCoach);
 ui.coachTest.addEventListener("click", () => {
-  // a click is the user activation Chrome wants before the page may speak
-  if (!state.speak) state.speak = browserSpeaker();
-  if (state.speak) state.speak("Smile coach ready"); else setStatus("speech synthesis not available in this browser");
+  if (ensureSpeaker()) state.speak("Smile coach ready"); else setStatus("speech synthesis not available in this browser");
 });
 
 document.addEventListener("keydown", e => {
@@ -550,6 +583,7 @@ document.addEventListener("drop", async e => {
   requestAnimationFrame(tick);
   await listCams();
   try { await syncModules(); } catch (e) { setStatus(`error: ${e.message}`); console.error(e); return; }
+  loadCoachSettings();
   syncCoach();
   const params = new URLSearchParams(location.search);
   if (params.get("image")) {
