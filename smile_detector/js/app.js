@@ -12,13 +12,9 @@ import { EmotionSmoother } from "./smoother.js";
 import { expressionsFromBlendshapes, LABELS } from "./expressions.js";
 import { PositiveTimer, formatDuration } from "./positive_timer.js";
 import { ZoomTracker } from "./zoom.js";
-import { SmileCoach, browserSpeaker } from "./coach.js";
 
 /** The emotion labels that make the positive-time stopwatch run. */
 const POSITIVE_LABELS = new Set(["happy"]);
-
-/** Seconds the spoken line stays on screen as a caption. */
-const COACH_CAPTION_S = 5;
 
 const $ = id => document.getElementById(id);
 const ui = {
@@ -27,8 +23,7 @@ const ui = {
   blink: $("blink"), blinkMode: $("blinkMode"), blinkThresh: $("blinkThresh"),
   hands: $("hands"), handsHold: $("handsHold"), handsResetOn: $("handsResetOn"), handsReset: $("handsReset"),
   emotion: $("emotion"), vitEvery: $("vitEvery"),
-  posTimer: $("posTimer"), sessionClock: $("sessionClock"), zoom: $("zoom"),
-  coach: $("coach"), coachFirst: $("coachFirst"), coachEvery: $("coachEvery"), coachThresh: $("coachThresh"), coachTest: $("coachTest"),
+  posTimer: $("posTimer"), zoom: $("zoom"),
   stats: $("stats"), bars: $("bars"),
 };
 const ctx = ui.canvas.getContext("2d");
@@ -43,12 +38,8 @@ const state = {
   hands: null,
   smoother: new EmotionSmoother(),
   positive: new PositiveTimer(),
-  startS: performance.now() / 1000,   // page load: the session clock counts from here
   zoom: new ZoomTracker(),
   zoomRoi: null,     // region fed to the face detector next frame, null = full frame
-  coach: null,       // SmileCoach while the voice coach is on
-  speak: null,       // speak(text) on the Web Speech API, null where unavailable
-  blockedText: null, // a line the browser refused to speak, retried on the next click
   vit: null,
   vitPreds: null,
   frame: 0,
@@ -58,6 +49,9 @@ const state = {
   lastVideoTime: -1,
   running: false,
   dirty: false,        // image mode: re-render on the next tick
+  startTime: performance.now(),  // wall-clock start, for the elapsed-time clock
+  elapsed: 0,                    // seconds since startTime (updated each frame)
+  pctPositive: 0,                // 0-100, positive.seconds / elapsed
 };
 
 const setStatus = msg => { ui.status.textContent = msg; };
@@ -231,12 +225,11 @@ function processFrame(src) {
   const positive = !!preds && POSITIVE_LABELS.has(preds[0].label);
   state.positive.feed(positive, nowS);
 
-  // --- smile coach: happy time over face time, a spoken verdict when due ---
-  if (state.coach) {
-    const verdict = state.coach.feed(positive, !!preds, nowS);
-    if (verdict) console.log(`[coach] ${verdict.kind}: "${verdict.text}" happy=${(verdict.frac * 100).toFixed(0)}%`
-      + (verdict.prevFrac === null ? "" : ` (was ${(verdict.prevFrac * 100).toFixed(0)}%)`));
-  }
+  // --- elapsed-time clock (since the program started) + happy% ---
+  // A live ratio, not a separate accumulator: recomputed from the two
+  // stopwatches above, so it can only ever agree with what they show.
+  state.elapsed = nowS - state.startTime / 1000;
+  state.pctPositive = state.elapsed > 0 ? 100 * state.positive.seconds / state.elapsed : 0;
 
   // --- fps ---
   const t = performance.now();
@@ -272,10 +265,12 @@ function render(src, { face, blink, preds, rect, nowS }) {
   }
   ctx.restore();
 
-  // main indicators: not debug, so the overlay toggle does not hide them
-  if (ui.posTimer.checked) drawPositiveTimer(W, H);
-  if (ui.sessionClock.checked) drawSessionClock(W, H, nowS);
-  if (state.coach) drawCoach(W, H, nowS);
+  // main indicator: not debug, so the overlay toggle does not hide it
+  if (ui.posTimer.checked) {
+    const elapsedBottom = drawElapsedTimer(W, H);
+    const posBottom = drawPositiveTimer(W, H, elapsedBottom);
+    drawPositivePct(W, posBottom);
+  }
 
   if (!ui.overlay.checked) return;
   ctx.lineWidth = 2;
@@ -325,9 +320,12 @@ function render(src, { face, blink, preds, rect, nowS }) {
 /**
  * Cumulative positive time, top centre, big enough to read across a room.
  * Green with a dot while it runs, dimmed grey while it is stopped: the state
- * is legible at a glance without reading the digits.
+ * is legible at a glance without reading the digits. `topY`, when given,
+ * overrides the default top margin - used to stack this under the
+ * elapsed-time clock. Returns the box's bottom edge, so a caller can stack
+ * more readouts under it.
  */
-function drawPositiveTimer(W, H) {
+function drawPositiveTimer(W, H, topY = null) {
   const { seconds, running } = state.positive;
   const txt = formatDuration(seconds);
   const size = Math.max(18, Math.round(H / 10));
@@ -341,7 +339,7 @@ function drawPositiveTimer(W, H) {
   const gap = running ? r * 3 : 0;
   const tw = ctx.measureText(txt).width;
   const bw = tw + gap + padX * 2, bh = size + padY * 2;
-  const bx = (W - bw) / 2, by = size * 0.35, cy = by + bh / 2;
+  const bx = (W - bw) / 2, by = topY ?? size * 0.35, cy = by + bh / 2;
 
   ctx.fillStyle = "rgba(0,0,0,.55)";
   ctx.beginPath();
@@ -356,68 +354,42 @@ function drawPositiveTimer(W, H) {
   ctx.fillStyle = running ? green : grey;
   ctx.fillText(txt, bx + padX + gap, cy + size * 0.04);
   ctx.restore();
+  return by + bh;
 }
 
 /**
- * Wall-clock time since the page loaded, in a small pill under the stopwatch
- * (or in its place when the stopwatch is hidden). Elapsed time, not frames:
- * a background tab keeps counting.
+ * Wall-clock time since the program started, drawn directly above the
+ * positive-time stopwatch. It never stops, so there's no on/off state to
+ * signal - just a plain, constant readout. Returns its bottom edge, which
+ * becomes the stopwatch's topY so the two stack with no overlap.
  */
-function drawSessionClock(W, H, nowS) {
-  const txt = `session ${formatDuration(nowS - state.startS)}`;
-  const big = Math.max(18, Math.round(H / 10));   // the stopwatch's size, to sit right under it
-  const size = Math.max(12, Math.round(H / 30));
+function drawElapsedTimer(W, H) {
+  const txt = `elapsed ${formatDuration(state.elapsed)}`;
+  const size = Math.max(14, Math.round(H / 22));
   ctx.save();
   ctx.font = `500 ${size}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-  ctx.textBaseline = "middle";
+  ctx.textBaseline = "top";
   ctx.textAlign = "center";
-  const tw = ctx.measureText(txt).width;
-  const padX = size * 0.6, bh = size * 1.6;
-  const by = ui.posTimer.checked ? big * 0.35 + big * 1.6 + size * 0.4 : size * 0.6;
-  ctx.fillStyle = "rgba(0,0,0,.55)";
-  ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(W / 2 - tw / 2 - padX, by, tw + padX * 2, bh, bh * 0.3);
-  else ctx.rect(W / 2 - tw / 2 - padX, by, tw + padX * 2, bh);
-  ctx.fill();
   ctx.fillStyle = "rgba(255,255,255,.75)";
-  ctx.fillText(txt, W / 2, by + bh / 2 + size * 0.04);
+  const y = size * 0.5;
+  ctx.fillText(txt, W / 2, y);
   ctx.restore();
+  return y + size * 1.4;
 }
 
 /**
- * Coach readout at the bottom centre: the running happy share and the time to
- * the next verdict, plus the last line spoken as a caption for a few seconds.
+ * % of elapsed time spent positive, drawn directly under the stopwatch.
+ * Takes the stopwatch's own bottom edge so it always sits right beneath it
+ * regardless of the stopwatch's font size or running/stopped padding.
  */
-function drawCoach(W, H, nowS) {
-  const c = state.coach;
-  const frac = c.fraction();
-  const prev = c.prevFrac;
-  const info = `happy ${frac === null ? "--" : (frac * 100).toFixed(0) + "%"}`
-    + (prev === null ? "" : `  (was ${(prev * 100).toFixed(0)}%)`)
-    + `  ·  next verdict in ${formatDuration(c.nextInS(nowS))}`;
-  const size = Math.max(14, Math.round(H / 32));
+function drawPositivePct(W, topY) {
+  const size = Math.max(14, Math.round(ui.canvas.height / 22));
   ctx.save();
+  ctx.font = `500 ${size}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.textBaseline = "top";
   ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = `500 ${size}px system-ui, sans-serif`;
-  const infoW = ctx.measureText(info).width;
-  let y = H - size * 1.6;
-  ctx.fillStyle = "rgba(0,0,0,.55)";
-  ctx.fillRect(W / 2 - infoW / 2 - size * 0.6, y - size * 0.8, infoW + size * 1.2, size * 1.6);
-  ctx.fillStyle = "rgba(255,255,255,.85)";
-  ctx.fillText(info, W / 2, y);
-
-  const last = c.last;
-  if (last && nowS - last.atS < COACH_CAPTION_S) {
-    const big = Math.max(20, Math.round(H / 16));
-    ctx.font = `600 ${big}px system-ui, sans-serif`;
-    const tw = ctx.measureText(last.text).width;
-    y -= size * 1.6 + big;
-    ctx.fillStyle = "rgba(0,0,0,.65)";
-    ctx.fillRect(W / 2 - tw / 2 - big * 0.6, y - big * 0.85, tw + big * 1.2, big * 1.7);
-    ctx.fillStyle = last.kind === "encouragement" ? "#0f0" : "#f66";
-    ctx.fillText(last.text, W / 2, y);
-  }
+  ctx.fillStyle = "rgba(255,255,255,.75)";
+  ctx.fillText(`${state.pctPositive.toFixed(1)}% happy`, W / 2, topY + size * 0.3);
   ctx.restore();
 }
 
@@ -436,11 +408,7 @@ function publish({ face, blink, expr, preds, rect, hands }) {
     valence: expr?.valence ?? null, arousal: expr?.arousal ?? null, smile: expr?.smile ?? null,
     blink: blink ? { level: blink.level, closed: blink.closed, blinked: blink.blinked, count: blink.blinks, perMin: blink.perMin } : null,
     positiveTime: { seconds: state.positive.seconds, running: state.positive.running },
-    sessionS: performance.now() / 1000 - state.startS,
-    coach: state.coach ? {
-      happyFrac: state.coach.fraction(), prevFrac: state.coach.prevFrac,
-      nextInS: state.coach.nextInS(performance.now() / 1000), last: state.coach.last,
-    } : null,
+    elapsed: state.elapsed, pctPositive: state.pctPositive,
     hands, palms: state.hands?.palms || {}, rect,
   };
   window.emotionState = s;
@@ -459,12 +427,9 @@ function renderStats(s) {
   if (ui.zoom.checked) lines.push(`zoom: ${state.zoom.state}`);
   if (s.valence !== null) lines.push(`valence ${s.valence.toFixed(2)}  arousal ${s.arousal.toFixed(2)}`);
   if (s.blink) lines.push(`blink: ${s.blink.count} (${s.blink.perMin.toFixed(0)}/min)`);
-  lines.push(`positive: ${formatDuration(s.positiveTime.seconds)} ${s.positiveTime.running ? "(running)" : "(stopped)"}  session: ${formatDuration(s.sessionS)}`);
-  if (s.coach) {
-    const pct = v => v === null ? "--" : `${(v * 100).toFixed(0)}%`;
-    lines.push(`coach: happy ${pct(s.coach.happyFrac)} (was ${pct(s.coach.prevFrac)})  next in ${formatDuration(s.coach.nextInS)}`);
-    if (s.coach.last) lines.push(`  last: ${s.coach.last.kind} "${s.coach.last.text}"`);
-  }
+  lines.push(`elapsed: ${formatDuration(s.elapsed)}`);
+  lines.push(`positive: ${formatDuration(s.positiveTime.seconds)} ${s.positiveTime.running ? "(running)" : "(stopped)"}`);
+  lines.push(`${s.pctPositive.toFixed(1)}% of elapsed time`);
   if (state.hands) lines.push(`hands: ${s.hands}`);
   ui.stats.textContent = lines.join("\n");
   ui.bars.innerHTML = LABELS.map(l => {
@@ -496,66 +461,7 @@ for (const el of [ui.blink, ui.blinkMode, ui.blinkThresh, ui.hands, ui.handsHold
 ui.mirror.addEventListener("change", () => { state.dirty = true; });
 ui.overlay.addEventListener("change", () => { state.dirty = true; });
 ui.posTimer.addEventListener("change", () => { state.dirty = true; });
-ui.sessionClock.addEventListener("change", () => { state.dirty = true; });
 ui.zoom.addEventListener("change", () => { state.zoom.reset(); state.zoomRoi = null; state.dirty = true; });
-
-/** Panel settings of the coach, kept across reloads. */
-const COACH_KEY = "smile_detector.coach";
-function saveCoachSettings() {
-  try {
-    localStorage.setItem(COACH_KEY, JSON.stringify({
-      on: ui.coach.checked, first: ui.coachFirst.value, every: ui.coachEvery.value, thresh: ui.coachThresh.value,
-    }));
-  } catch {}
-}
-function loadCoachSettings() {
-  try {
-    const c = JSON.parse(localStorage.getItem(COACH_KEY) || "null");
-    if (!c) return;
-    ui.coach.checked = !!c.on;
-    if (c.first) ui.coachFirst.value = c.first;
-    if (c.every) ui.coachEvery.value = c.every;
-    if (c.thresh) ui.coachThresh.value = c.thresh;
-  } catch {}
-}
-
-/** Speech feedback in the status line; a blocked line is retried on the next click. */
-function onVoiceState(st, text, detail) {
-  if (st === "speaking") { state.blockedText = null; setStatus(`voice: "${text}"`); }
-  else if (st === "blocked") { state.blockedText = text; setStatus("voice blocked by the browser: click anywhere on the page to enable it"); }
-  else if (st === "error") setStatus(`voice error: ${detail}`);
-  console.log(`[voice] ${st}${detail ? ` (${detail})` : ""}: "${text}"`);
-}
-function ensureSpeaker() {
-  if (!state.speak) state.speak = browserSpeaker({ onState: onVoiceState });
-  return state.speak;
-}
-document.addEventListener("click", () => {
-  // the click is the user activation the browser wanted: say the line it refused
-  if (state.blockedText && state.speak) { const t = state.blockedText; state.blockedText = null; state.speak(t); }
-}, true);
-
-/**
- * (Re)build the coach from the panel. Any change restarts it: the windows
- * only make sense from the moment the settings were chosen.
- */
-function syncCoach() {
-  saveCoachSettings();
-  if (!ui.coach.checked) { state.coach = null; state.dirty = true; return; }
-  if (!ensureSpeaker()) setStatus("speech synthesis not available in this browser: the coach runs silently");
-  state.coach = new SmileCoach({
-    firstS: Math.max(5, parseFloat(ui.coachFirst.value) || 120),
-    everyS: Math.max(5, parseFloat(ui.coachEvery.value) || 60),
-    threshold: Math.min(1, Math.max(0, (parseFloat(ui.coachThresh.value) || 30) / 100)),
-    speak: state.speak,
-    nowS: performance.now() / 1000,
-  });
-  state.dirty = true;
-}
-for (const el of [ui.coach, ui.coachFirst, ui.coachEvery, ui.coachThresh]) el.addEventListener("change", syncCoach);
-ui.coachTest.addEventListener("click", () => {
-  if (ensureSpeaker()) state.speak("Smile coach ready"); else setStatus("speech synthesis not available in this browser");
-});
 
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
@@ -564,7 +470,6 @@ document.addEventListener("keydown", e => {
   if (e.key === "m") { ui.mirror.checked = !ui.mirror.checked; state.dirty = true; }
   if (e.key === "r") { state.hands?.reset(performance.now() / 1000); state.dirty = true; }
   if (e.key === "t") { state.positive.reset(performance.now() / 1000); state.dirty = true; }
-  if (e.key === "c") { state.coach?.check(performance.now() / 1000); state.dirty = true; }
   if (e.key === "f") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
 });
 
@@ -583,8 +488,6 @@ document.addEventListener("drop", async e => {
   requestAnimationFrame(tick);
   await listCams();
   try { await syncModules(); } catch (e) { setStatus(`error: ${e.message}`); console.error(e); return; }
-  loadCoachSettings();
-  syncCoach();
   const params = new URLSearchParams(location.search);
   if (params.get("image")) {
     // ?image=url : test image without a camera (e.g. ?image=test.jpg)
