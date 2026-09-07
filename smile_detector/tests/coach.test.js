@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SmileCoach, ENCOURAGEMENTS, REPRIMANDS } from "../js/coach.js";
+import { SmileCoach, ENCOURAGEMENTS, REPRIMANDS, STEADY } from "../js/coach.js";
 
 /**
  * Feed `seconds` of face at `happyFrac` happy, 10 samples per second. The
@@ -100,14 +100,25 @@ test("each list keeps its own cursor across the other's turns", () => {
   assert.deepEqual(spoken, [ENCOURAGEMENTS[0], REPRIMANDS[0], ENCOURAGEMENTS[1], REPRIMANDS[1]]);
 });
 
-test("a tie falls back to the threshold", () => {
+test("the first verdict goes by the threshold, later ties say keep going", () => {
   const spoken = [];
   const c = coachWith(spoken);
-  run(c, 0, 120, 0.0);     // rep 0
-  run(c, 120, 60, 0.0);    // same, below 30% -> rep 1
+  run(c, 0, 120, 0.0);     // first: below 30% -> rep 0
+  run(c, 120, 60, 0.0);    // unchanged -> steady
   run(c, 180, 60, 1.0);    // better -> enc 0
-  run(c, 240, 60, 1.0);    // same, above 30% -> enc 1
-  assert.deepEqual(spoken, [REPRIMANDS[0], REPRIMANDS[1], ENCOURAGEMENTS[0], ENCOURAGEMENTS[1]]);
+  run(c, 240, 60, 1.0);    // unchanged -> steady, no cursor moved
+  run(c, 300, 60, 0.5);    // worse -> rep 1
+  assert.deepEqual(spoken, [REPRIMANDS[0], STEADY, ENCOURAGEMENTS[0], STEADY, REPRIMANDS[1]]);
+  assert.equal(c.last.kind, "reprimand");
+});
+
+test("unchanged means within the tie margin", () => {
+  const c = new SmileCoach({ tieMargin: 0.05, nowS: 0 });
+  run(c, 0, 120, 0.5);
+  c.happy.seconds = 54; c.visible.seconds = 100;   // 54% vs 50%: within 5 points
+  assert.equal(c.check(180).kind, "steady");
+  c.happy.seconds = 60; c.visible.seconds = 100;   // 60% vs the 54% just measured: beyond it
+  assert.equal(c.check(240).kind, "encouragement");
 });
 
 test("the cursor wraps around at the end of a list", () => {
@@ -202,12 +213,14 @@ test("a reference passed to feed wins over the previous window", () => {
     }
     return out;
   };
-  const a = runRef(0, 120, 0.5, 0.7);
+  const first = runRef(0, 120, 0.5, 0.7);
+  assert.equal(first[0].kind, "encouragement");   // first verdict: threshold, not the reference
+  const a = runRef(120, 60, 0.5, 0.7);
   assert.equal(a[0].kind, "reprimand");
   assert.ok(Math.abs(a[0].prevFrac - 0.7) < 1e-9);
-  const b = runRef(120, 60, 0.9, 0.7);
+  const b = runRef(180, 60, 0.9, 0.7);
   assert.equal(b[0].kind, "encouragement");
-  assert.deepEqual(spoken, [REPRIMANDS[0], ENCOURAGEMENTS[0]]);
+  assert.deepEqual(spoken, [ENCOURAGEMENTS[0], REPRIMANDS[0], ENCOURAGEMENTS[1]]);
 });
 
 test("a null reference falls back to the previous window", () => {
@@ -216,8 +229,8 @@ test("a null reference falls back to the previous window", () => {
   c.feed(true, true, 120.1, 0.9);   // reference set...
   c.feed(true, true, 120.2, null);  // ...and withdrawn: back to prevFrac
   assert.equal(c.reference, null);
-  const v = run(c, 120.2, 59.8, 0.6);
-  assert.equal(v[0].kind, "encouragement");   // 60% > previous window's 50%
+  const v = run(c, 120.2, 59.8, 0.8);
+  assert.equal(v[0].kind, "encouragement");   // 80% > previous window's 50%
 });
 
 // --- browserSpeaker on a fake Web Speech API ---

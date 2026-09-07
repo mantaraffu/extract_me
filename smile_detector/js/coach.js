@@ -5,11 +5,12 @@
  * The first verdict comes after `firstS` seconds, then one every `everyS`
  * seconds. Each verdict compares the happy fraction of the window just closed
  * with a reference: smiling more than the reference earns the next line of
- * the encouragements, smiling less earns the next line of the reprimands, a
- * tie (and the very first verdict without a reference) falls back to
- * `threshold`. Each list keeps its own cursor, which only moves forward (and
- * wraps around at the end), so the tone escalates within a list rather than
- * repeating the same line.
+ * the encouragements, smiling less earns the next line of the reprimands, and
+ * a share unchanged within `tieMargin` earns the steady line ("keep going!"),
+ * which moves no cursor. The very first verdict has nothing to compare with
+ * and goes by `threshold` instead. Each list keeps its own cursor, which only
+ * moves forward (and wraps around at the end), so the tone escalates within a
+ * list rather than repeating the same line.
  *
  * The reference is whatever the caller passes to `feed` (the app passes the
  * session-wide share, the big number on screen, so "was 35%" is that number),
@@ -48,15 +49,20 @@ export const REPRIMANDS = [
   "did you forget how to smile?",
 ];
 
+/** Said when the share is unchanged from the reference. */
+export const STEADY = "keep going!";
+
 export class SmileCoach {
   constructor({
-    firstS = 120, everyS = 60, threshold = 0.3,
-    encouragements = ENCOURAGEMENTS, reprimands = REPRIMANDS,
+    firstS = 120, everyS = 60, threshold = 0.3, tieMargin = 0.02,
+    encouragements = ENCOURAGEMENTS, reprimands = REPRIMANDS, steady = STEADY,
     speak = null, nowS = 0,
   } = {}) {
     this.firstS = firstS;
     this.everyS = everyS;
     this.threshold = threshold;
+    this.tieMargin = tieMargin;
+    this.steady = steady;
     this.encouragements = encouragements;
     this.reprimands = reprimands;
     this.speak = speak;
@@ -108,23 +114,26 @@ export class SmileCoach {
     this.happy.reset(nowS);
     this.visible.reset(nowS);
 
-    // Better than last time is praise, worse is a scolding; the very first
-    // verdict, and a tie, fall back to the threshold.
-    let good;
-    if (prev === null || frac === prev) good = frac >= this.threshold;
-    else good = frac > prev;
+    // Better than the reference is praise, worse is a scolding, unchanged is
+    // "keep going". The very first verdict has no history: the threshold decides.
+    let kind;
+    if (this.last === null || prev === null) kind = frac >= this.threshold ? "encouragement" : "reprimand";
+    else if (Math.abs(frac - prev) <= this.tieMargin) kind = "steady";
+    else kind = frac > prev ? "encouragement" : "reprimand";
 
     let text;
-    if (good) {
+    if (kind === "encouragement") {
       this.encIdx = (this.encIdx + 1) % this.encouragements.length;
       text = this.encouragements[this.encIdx];
-    } else {
+    } else if (kind === "reprimand") {
       this.repIdx = (this.repIdx + 1) % this.reprimands.length;
       text = this.reprimands[this.repIdx];
+    } else {
+      text = this.steady;
     }
     if (measured !== null) this.prevFrac = frac;   // an unseen face leaves the reference alone
     this.dueS = nowS + this.everyS;
-    this.last = { kind: good ? "encouragement" : "reprimand", text, frac, prevFrac: prev, visibleS, atS: nowS };
+    this.last = { kind, text, frac, prevFrac: prev, visibleS, atS: nowS };
     if (this.speak) this.speak(text);
     return this.last;
   }

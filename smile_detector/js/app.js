@@ -447,7 +447,7 @@ function drawCoach(W, H, nowS) {
     y -= size * 1.6 + big;
     ctx.fillStyle = "rgba(0,0,0,.65)";
     ctx.fillRect(W / 2 - tw / 2 - big * 0.6, y - big * 0.85, tw + big * 1.2, big * 1.7);
-    ctx.fillStyle = last.kind === "encouragement" ? "#0f0" : "#f66";
+    ctx.fillStyle = last.kind === "encouragement" ? "#0f0" : last.kind === "reprimand" ? "#f66" : "#ff0";
     ctx.fillText(last.text, W / 2, y);
   }
   ctx.restore();

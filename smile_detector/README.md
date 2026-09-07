@@ -80,10 +80,11 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   every minute. Each verdict compares the round just closed with the session
   share, the "session N% happy" at the top: smiling more than your session
   average moves one step along the encouragements list, smiling less moves
-  one step along the reprimands list. Each list keeps its own cursor and
-  wraps around at the end, so the tone escalates instead of repeating. A tie,
-  and the very first verdict when nothing has been measured yet, fall back to
-  the 30% threshold. Both shares are over the time a face was visible, not
+  one step along the reprimands list, and a share unchanged within 2 points
+  earns "keep going!" and moves nothing. Each list keeps its own cursor and
+  wraps around at the end, so the tone escalates instead of repeating. The
+  very first verdict has nothing to compare with and goes by the 30%
+  threshold. Both shares are over the time a face was visible, not
   wall-clock time. A verdict comes at every deadline, no exceptions: a round
   with no face at all counts as 0% happy. Speech is the browser's Web Speech API with an
   English system voice. Chrome only speaks after a click on the page: a line
