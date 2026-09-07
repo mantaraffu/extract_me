@@ -244,7 +244,9 @@ function processFrame(src) {
 
   // --- smile coach: happy time over face time, a spoken verdict when due ---
   if (state.coach) {
-    const verdict = state.coach.feed(positive, !!preds, nowS);
+    // the reference is the session share above, so "was" is that number
+    const ref = state.faceTime.seconds > 0 ? state.pctPositive / 100 : null;
+    const verdict = state.coach.feed(positive, !!preds, nowS, ref);
     if (verdict) console.log(`[coach] ${verdict.kind}: "${verdict.text}" happy=${(verdict.frac * 100).toFixed(0)}%`
       + (verdict.prevFrac === null ? "" : ` (was ${(verdict.prevFrac * 100).toFixed(0)}%)`));
   }
@@ -408,7 +410,7 @@ function drawPositivePct(W, topY) {
   ctx.textBaseline = "top";
   ctx.textAlign = "center";
   ctx.fillStyle = "rgba(255,255,255,.75)";
-  const txt = state.faceTime.seconds > 0 ? `${state.pctPositive.toFixed(1)}% happy` : "--% happy";
+  const txt = `session ${state.faceTime.seconds > 0 ? state.pctPositive.toFixed(1) : "--"}% happy`;
   ctx.fillText(txt, W / 2, topY + size * 0.3);
   ctx.restore();
 }
@@ -421,8 +423,9 @@ function drawCoach(W, H, nowS) {
   const c = state.coach;
   const frac = c.fraction();
   const prev = c.prevFrac;
-  const info = `happy ${frac === null ? "--" : (frac * 100).toFixed(0) + "%"}`
-    + (prev === null ? "" : `  (was ${(prev * 100).toFixed(0)}%)`)
+  const ref = c.reference ?? prev;
+  const info = `this round ${frac === null ? "--" : (frac * 100).toFixed(0)}% happy`
+    + (ref === null ? "" : `  vs session ${(ref * 100).toFixed(0)}%`)
     + `  ·  next verdict in ${formatDuration(c.nextInS(nowS))}`;
   const size = Math.max(14, Math.round(H / 32));
   ctx.save();
@@ -467,7 +470,7 @@ function publish({ face, blink, expr, preds, rect, hands }) {
     positiveTime: { seconds: state.positive.seconds, running: state.positive.running },
     elapsed: state.elapsed, faceTime: state.faceTime.seconds, pctPositive: state.pctPositive,
     coach: state.coach ? {
-      happyFrac: state.coach.fraction(), prevFrac: state.coach.prevFrac,
+      happyFrac: state.coach.fraction(), reference: state.coach.reference, prevFrac: state.coach.prevFrac,
       nextInS: state.coach.nextInS(performance.now() / 1000), last: state.coach.last,
     } : null,
     hands, palms: state.hands?.palms || {}, rect,
@@ -493,7 +496,7 @@ function renderStats(s) {
   lines.push(`face time: ${formatDuration(s.faceTime)}  ${s.pctPositive.toFixed(1)}% happy`);
   if (s.coach) {
     const pct = v => v === null ? "--" : `${(v * 100).toFixed(0)}%`;
-    lines.push(`coach: happy ${pct(s.coach.happyFrac)} (was ${pct(s.coach.prevFrac)})  next in ${formatDuration(s.coach.nextInS)}`);
+    lines.push(`coach: this round ${pct(s.coach.happyFrac)} vs session ${pct(s.coach.reference)}  next in ${formatDuration(s.coach.nextInS)}`);
     if (s.coach.last) lines.push(`  last: ${s.coach.last.kind} "${s.coach.last.text}"`);
   }
   if (state.hands) lines.push(`hands: ${s.hands}`);

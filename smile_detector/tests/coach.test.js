@@ -190,6 +190,36 @@ test("no speaker: the verdict still comes back", () => {
   assert.equal(v.length, 1);
 });
 
+test("a reference passed to feed wins over the previous window", () => {
+  const spoken = [];
+  const c = coachWith(spoken);
+  // session share 0.7 all along: a 50% window is worse, a 90% window is better
+  const runRef = (from, secs, frac, ref) => {
+    const out = [];
+    for (let i = 1; i <= secs * 10; i++) {
+      const v = c.feed((i % 10) <= Math.round(frac * 10), true, from + i / 10, ref);
+      if (v) out.push(v);
+    }
+    return out;
+  };
+  const a = runRef(0, 120, 0.5, 0.7);
+  assert.equal(a[0].kind, "reprimand");
+  assert.ok(Math.abs(a[0].prevFrac - 0.7) < 1e-9);
+  const b = runRef(120, 60, 0.9, 0.7);
+  assert.equal(b[0].kind, "encouragement");
+  assert.deepEqual(spoken, [REPRIMANDS[0], ENCOURAGEMENTS[0]]);
+});
+
+test("a null reference falls back to the previous window", () => {
+  const c = coachWith([]);
+  run(c, 0, 120, 0.5);
+  c.feed(true, true, 120.1, 0.9);   // reference set...
+  c.feed(true, true, 120.2, null);  // ...and withdrawn: back to prevFrac
+  assert.equal(c.reference, null);
+  const v = run(c, 120.2, 59.8, 0.6);
+  assert.equal(v[0].kind, "encouragement");   // 60% > previous window's 50%
+});
+
 // --- browserSpeaker on a fake Web Speech API ---
 
 function fakeSpeech() {

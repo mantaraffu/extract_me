@@ -76,24 +76,23 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   toggle does not hide it; `t` resets it. Since it reads the smoothed label, it
   is inactive with emotion set to *off*.
 - **Smile coach** (voice, off by default): a spoken verdict on the share of
-  time the face was `happy`. The first one comes after 2 minutes: at least 30%
-  is praise, less is a scolding. From then on every minute the new window is
-  compared with the previous one: smiling more than before moves one step
-  along the encouragements list, smiling less moves one step along the
-  reprimands list. Each list keeps its own cursor and wraps around at the end,
-  so the tone escalates instead of repeating. A tie falls back to the 30%
-  threshold. The share is over the time a face was visible, not wall-clock
-  time. A verdict comes at every deadline, no exceptions: a window with no
-  face at all counts as 0% happy, but does not replace the previous reading,
-  so the next comparison still starts from the last share actually measured
-  (the "was 35%" on screen). Speech is the browser's Web Speech API with an
+  time the face was `happy`. The first one comes after 2 minutes, then one
+  every minute. Each verdict compares the round just closed with the session
+  share, the "session N% happy" at the top: smiling more than your session
+  average moves one step along the encouragements list, smiling less moves
+  one step along the reprimands list. Each list keeps its own cursor and
+  wraps around at the end, so the tone escalates instead of repeating. A tie,
+  and the very first verdict when nothing has been measured yet, fall back to
+  the 30% threshold. Both shares are over the time a face was visible, not
+  wall-clock time. A verdict comes at every deadline, no exceptions: a round
+  with no face at all counts as 0% happy. Speech is the browser's Web Speech API with an
   English system voice. Chrome only speaks after a click on the page: a line
   it refuses shows "voice blocked" in the status line and is said at the next
   click anywhere. The status line also echoes each line as it is spoken, so a
   silent coach is never a mystery. The panel settings, including the on/off
-  switch, survive a reload. Both lists live at the top of `coach.js`. The running share, the previous one and the countdown
-  to the next verdict sit at the bottom of the canvas; the spoken line stays
-  there as a caption for 5 s. Timings and threshold are in the panel; `c`
+  switch, survive a reload. Both lists live at the top of `coach.js`. The bottom of the canvas reads
+  "this round N% happy vs session M% · next verdict in mm:ss"; the spoken
+  line stays there as a caption for 5 s. Timings and threshold are in the panel; `c`
   forces a verdict now.
 - **Elapsed time and % happy**: above the stopwatch, the wall-clock time
   since the program started; below it, the share of *face time* spent with a

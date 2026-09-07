@@ -2,13 +2,18 @@
  * Smile coach: periodic spoken verdicts on how much of the time the face was
  * happy.
  *
- * The first verdict comes after `firstS` seconds and compares the happy
- * fraction of that window with `threshold`. Every `everyS` seconds after that
- * the new window is compared with the previous one: smiling more than before
- * earns the next line of the encouragements, smiling less earns the next line
- * of the reprimands. Each list keeps its own cursor, which only moves forward
- * (and wraps around at the end), so the tone escalates within a list rather
- * than repeating the same line.
+ * The first verdict comes after `firstS` seconds, then one every `everyS`
+ * seconds. Each verdict compares the happy fraction of the window just closed
+ * with a reference: smiling more than the reference earns the next line of
+ * the encouragements, smiling less earns the next line of the reprimands, a
+ * tie (and the very first verdict without a reference) falls back to
+ * `threshold`. Each list keeps its own cursor, which only moves forward (and
+ * wraps around at the end), so the tone escalates within a list rather than
+ * repeating the same line.
+ *
+ * The reference is whatever the caller passes to `feed` (the app passes the
+ * session-wide share, the big number on screen, so "was 35%" is that number),
+ * and falls back to the previous window's fraction when none is given.
  *
  * The fraction is happy seconds over seconds with a face visible, not over
  * wall-clock time. A verdict comes at every deadline, no exceptions: a window
@@ -65,7 +70,8 @@ export class SmileCoach {
     this.happy.reset(nowS);
     this.visible.reset(nowS);
     this.dueS = nowS + this.firstS;
-    this.prevFrac = null;   // null until the first verdict
+    this.prevFrac = null;   // last measured window, the fallback reference
+    this.reference = null;  // caller-supplied reference, wins over prevFrac when not null
     this.encIdx = -1;
     this.repIdx = -1;
     this.last = null;       // the latest verdict, kept for the caption
@@ -83,11 +89,13 @@ export class SmileCoach {
 
   /**
    * One sample per frame. `happy` only counts while `visible` is true.
+   * `reference` (0..1, or null) is the share the next verdict compares against.
    * Returns the verdict when one is due at this instant, otherwise null.
    */
-  feed(happy, visible, nowS) {
+  feed(happy, visible, nowS, reference = null) {
     this.visible.feed(visible, nowS);
     this.happy.feed(visible && happy, nowS);
+    this.reference = reference;
     return nowS >= this.dueS ? this.check(nowS) : null;
   }
 
@@ -96,7 +104,7 @@ export class SmileCoach {
     const measured = this.fraction();      // null when no face was seen at all
     const frac = measured ?? 0;
     const visibleS = this.visible.seconds;
-    const prev = this.prevFrac;
+    const prev = this.reference ?? this.prevFrac;
     this.happy.reset(nowS);
     this.visible.reset(nowS);
 
