@@ -91,6 +91,10 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   to the next verdict sit at the bottom of the canvas; the spoken line stays
   there as a caption for 5 s. Timings and threshold are in the panel; `c`
   forces a verdict now.
+- **Session clock**: wall-clock time since the page loaded, in a small pill
+  under the stopwatch (`sessionS` in the published state). Unlike the
+  stopwatch it never pauses, so the two together say how much of the session
+  was spent smiling.
 - **Distance**: the detector bundled in `face_landmarker.task` is BlazeFace
   short-range, which resizes the whole frame to about 128 px before looking at
   it. What decides detection is the *fraction* of the frame the face covers,
@@ -121,7 +125,7 @@ Every frame the page writes `window.emotionState` and dispatches the
 ```js
 window.addEventListener("emotionscript", e => {
   const s = e.detail;   // {fps, face, box, emotion, probs, valence, arousal,
-                      //  blink, positiveTime, coach, hands, palms, rect}
+                      //  blink, positiveTime, sessionS, coach, hands, palms, rect}
 });
 ```
 This is the hook for a p5.js sketch, a WebGL canvas or any other

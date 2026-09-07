@@ -27,7 +27,7 @@ const ui = {
   blink: $("blink"), blinkMode: $("blinkMode"), blinkThresh: $("blinkThresh"),
   hands: $("hands"), handsHold: $("handsHold"), handsResetOn: $("handsResetOn"), handsReset: $("handsReset"),
   emotion: $("emotion"), vitEvery: $("vitEvery"),
-  posTimer: $("posTimer"), zoom: $("zoom"),
+  posTimer: $("posTimer"), sessionClock: $("sessionClock"), zoom: $("zoom"),
   coach: $("coach"), coachFirst: $("coachFirst"), coachEvery: $("coachEvery"), coachThresh: $("coachThresh"), coachTest: $("coachTest"),
   stats: $("stats"), bars: $("bars"),
 };
@@ -43,6 +43,7 @@ const state = {
   hands: null,
   smoother: new EmotionSmoother(),
   positive: new PositiveTimer(),
+  startS: performance.now() / 1000,   // page load: the session clock counts from here
   zoom: new ZoomTracker(),
   zoomRoi: null,     // region fed to the face detector next frame, null = full frame
   coach: null,       // SmileCoach while the voice coach is on
@@ -272,6 +273,7 @@ function render(src, { face, blink, preds, rect, nowS }) {
 
   // main indicators: not debug, so the overlay toggle does not hide them
   if (ui.posTimer.checked) drawPositiveTimer(W, H);
+  if (ui.sessionClock.checked) drawSessionClock(W, H, nowS);
   if (state.coach) drawCoach(W, H, nowS);
 
   if (!ui.overlay.checked) return;
@@ -356,6 +358,32 @@ function drawPositiveTimer(W, H) {
 }
 
 /**
+ * Wall-clock time since the page loaded, in a small pill under the stopwatch
+ * (or in its place when the stopwatch is hidden). Elapsed time, not frames:
+ * a background tab keeps counting.
+ */
+function drawSessionClock(W, H, nowS) {
+  const txt = `session ${formatDuration(nowS - state.startS)}`;
+  const big = Math.max(18, Math.round(H / 10));   // the stopwatch's size, to sit right under it
+  const size = Math.max(12, Math.round(H / 30));
+  ctx.save();
+  ctx.font = `500 ${size}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  const tw = ctx.measureText(txt).width;
+  const padX = size * 0.6, bh = size * 1.6;
+  const by = ui.posTimer.checked ? big * 0.35 + big * 1.6 + size * 0.4 : size * 0.6;
+  ctx.fillStyle = "rgba(0,0,0,.55)";
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(W / 2 - tw / 2 - padX, by, tw + padX * 2, bh, bh * 0.3);
+  else ctx.rect(W / 2 - tw / 2 - padX, by, tw + padX * 2, bh);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,.75)";
+  ctx.fillText(txt, W / 2, by + bh / 2 + size * 0.04);
+  ctx.restore();
+}
+
+/**
  * Coach readout at the bottom centre: the running happy share and the time to
  * the next verdict, plus the last line spoken as a caption for a few seconds.
  */
@@ -407,6 +435,7 @@ function publish({ face, blink, expr, preds, rect, hands }) {
     valence: expr?.valence ?? null, arousal: expr?.arousal ?? null, smile: expr?.smile ?? null,
     blink: blink ? { level: blink.level, closed: blink.closed, blinked: blink.blinked, count: blink.blinks, perMin: blink.perMin } : null,
     positiveTime: { seconds: state.positive.seconds, running: state.positive.running },
+    sessionS: performance.now() / 1000 - state.startS,
     coach: state.coach ? {
       happyFrac: state.coach.fraction(), prevFrac: state.coach.prevFrac,
       nextInS: state.coach.nextInS(performance.now() / 1000), last: state.coach.last,
@@ -429,7 +458,7 @@ function renderStats(s) {
   if (ui.zoom.checked) lines.push(`zoom: ${state.zoom.state}`);
   if (s.valence !== null) lines.push(`valence ${s.valence.toFixed(2)}  arousal ${s.arousal.toFixed(2)}`);
   if (s.blink) lines.push(`blink: ${s.blink.count} (${s.blink.perMin.toFixed(0)}/min)`);
-  lines.push(`positive: ${formatDuration(s.positiveTime.seconds)} ${s.positiveTime.running ? "(running)" : "(stopped)"}`);
+  lines.push(`positive: ${formatDuration(s.positiveTime.seconds)} ${s.positiveTime.running ? "(running)" : "(stopped)"}  session: ${formatDuration(s.sessionS)}`);
   if (s.coach) {
     const pct = v => v === null ? "--" : `${(v * 100).toFixed(0)}%`;
     lines.push(`coach: happy ${pct(s.coach.happyFrac)} (was ${pct(s.coach.prevFrac)})  next in ${formatDuration(s.coach.nextInS)}`);
@@ -466,6 +495,7 @@ for (const el of [ui.blink, ui.blinkMode, ui.blinkThresh, ui.hands, ui.handsHold
 ui.mirror.addEventListener("change", () => { state.dirty = true; });
 ui.overlay.addEventListener("change", () => { state.dirty = true; });
 ui.posTimer.addEventListener("change", () => { state.dirty = true; });
+ui.sessionClock.addEventListener("change", () => { state.dirty = true; });
 ui.zoom.addEventListener("change", () => { state.zoom.reset(); state.zoomRoi = null; state.dirty = true; });
 
 /**
