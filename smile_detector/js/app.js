@@ -43,6 +43,7 @@ const state = {
   hands: null,
   smoother: new EmotionSmoother(),
   positive: new PositiveTimer(),
+  faceTime: new PositiveTimer(),   // time with a face and an emotion label, the base of the % happy
   zoom: new ZoomTracker(),
   zoomRoi: null,     // region fed to the face detector next frame, null = full frame
   coach: null,       // SmileCoach while the voice coach is on
@@ -59,7 +60,7 @@ const state = {
   dirty: false,        // image mode: re-render on the next tick
   startTime: performance.now(),  // wall-clock start, for the elapsed-time clock
   elapsed: 0,                    // seconds since startTime (updated each frame)
-  pctPositive: 0,                // 0-100, positive.seconds / elapsed
+  pctPositive: 0,                // 0-100, positive.seconds / faceTime.seconds
 };
 
 const setStatus = msg => { ui.status.textContent = msg; };
@@ -232,12 +233,14 @@ function processFrame(src) {
   // preds is null with no face and with emotion off, so the clock pauses on its own
   const positive = !!preds && POSITIVE_LABELS.has(preds[0].label);
   state.positive.feed(positive, nowS);
+  state.faceTime.feed(!!preds, nowS);
 
   // --- elapsed-time clock (since the program started) + happy% ---
-  // A live ratio, not a separate accumulator: recomputed from the two
-  // stopwatches above, so it can only ever agree with what they show.
+  // The share is over the time a face was being read, not over the clock:
+  // an empty room neither adds nor subtracts. A live ratio of the two
+  // stopwatches, not a third accumulator, so it always agrees with them.
   state.elapsed = nowS - state.startTime / 1000;
-  state.pctPositive = state.elapsed > 0 ? 100 * state.positive.seconds / state.elapsed : 0;
+  state.pctPositive = state.faceTime.seconds > 0 ? 100 * state.positive.seconds / state.faceTime.seconds : 0;
 
   // --- smile coach: happy time over face time, a spoken verdict when due ---
   if (state.coach) {
@@ -394,7 +397,7 @@ function drawElapsedTimer(W, H) {
 }
 
 /**
- * % of elapsed time spent positive, drawn directly under the stopwatch.
+ * % of face time spent positive, drawn directly under the stopwatch.
  * Takes the stopwatch's own bottom edge so it always sits right beneath it
  * regardless of the stopwatch's font size or running/stopped padding.
  */
@@ -405,7 +408,8 @@ function drawPositivePct(W, topY) {
   ctx.textBaseline = "top";
   ctx.textAlign = "center";
   ctx.fillStyle = "rgba(255,255,255,.75)";
-  ctx.fillText(`${state.pctPositive.toFixed(1)}% happy`, W / 2, topY + size * 0.3);
+  const txt = state.faceTime.seconds > 0 ? `${state.pctPositive.toFixed(1)}% happy` : "--% happy";
+  ctx.fillText(txt, W / 2, topY + size * 0.3);
   ctx.restore();
 }
 
@@ -461,7 +465,7 @@ function publish({ face, blink, expr, preds, rect, hands }) {
     valence: expr?.valence ?? null, arousal: expr?.arousal ?? null, smile: expr?.smile ?? null,
     blink: blink ? { level: blink.level, closed: blink.closed, blinked: blink.blinked, count: blink.blinks, perMin: blink.perMin } : null,
     positiveTime: { seconds: state.positive.seconds, running: state.positive.running },
-    elapsed: state.elapsed, pctPositive: state.pctPositive,
+    elapsed: state.elapsed, faceTime: state.faceTime.seconds, pctPositive: state.pctPositive,
     coach: state.coach ? {
       happyFrac: state.coach.fraction(), prevFrac: state.coach.prevFrac,
       nextInS: state.coach.nextInS(performance.now() / 1000), last: state.coach.last,
@@ -486,7 +490,7 @@ function renderStats(s) {
   if (s.blink) lines.push(`blink: ${s.blink.count} (${s.blink.perMin.toFixed(0)}/min)`);
   lines.push(`elapsed: ${formatDuration(s.elapsed)}`);
   lines.push(`positive: ${formatDuration(s.positiveTime.seconds)} ${s.positiveTime.running ? "(running)" : "(stopped)"}`);
-  lines.push(`${s.pctPositive.toFixed(1)}% of elapsed time`);
+  lines.push(`face time: ${formatDuration(s.faceTime)}  ${s.pctPositive.toFixed(1)}% happy`);
   if (s.coach) {
     const pct = v => v === null ? "--" : `${(v * 100).toFixed(0)}%`;
     lines.push(`coach: happy ${pct(s.coach.happyFrac)} (was ${pct(s.coach.prevFrac)})  next in ${formatDuration(s.coach.nextInS)}`);
@@ -589,7 +593,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "o") { ui.overlay.checked = !ui.overlay.checked; state.dirty = true; }
   if (e.key === "m") { ui.mirror.checked = !ui.mirror.checked; state.dirty = true; }
   if (e.key === "r") { state.hands?.reset(performance.now() / 1000); state.dirty = true; }
-  if (e.key === "t") { state.positive.reset(performance.now() / 1000); state.dirty = true; }
+  if (e.key === "t") { const t = performance.now() / 1000; state.positive.reset(t); state.faceTime.reset(t); state.dirty = true; }
   if (e.key === "c") { state.coach?.check(performance.now() / 1000); state.dirty = true; }
   if (e.key === "f") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
 });
