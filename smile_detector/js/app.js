@@ -27,7 +27,7 @@ const ui = {
   blink: $("blink"), blinkMode: $("blinkMode"), blinkThresh: $("blinkThresh"),
   hands: $("hands"), handsHold: $("handsHold"), handsResetOn: $("handsResetOn"), handsReset: $("handsReset"),
   emotion: $("emotion"), vitEvery: $("vitEvery"),
-  posTimer: $("posTimer"), sessionClock: $("sessionClock"), zoom: $("zoom"),
+  posTimer: $("posTimer"), zoom: $("zoom"),
   coach: $("coach"), coachFirst: $("coachFirst"), coachEvery: $("coachEvery"), coachThresh: $("coachThresh"), coachTest: $("coachTest"),
   stats: $("stats"), bars: $("bars"),
 };
@@ -43,7 +43,6 @@ const state = {
   hands: null,
   smoother: new EmotionSmoother(),
   positive: new PositiveTimer(),
-  startS: performance.now() / 1000,   // page load: the session clock counts from here
   zoom: new ZoomTracker(),
   zoomRoi: null,     // region fed to the face detector next frame, null = full frame
   coach: null,       // SmileCoach while the voice coach is on
@@ -58,6 +57,9 @@ const state = {
   lastVideoTime: -1,
   running: false,
   dirty: false,        // image mode: re-render on the next tick
+  startTime: performance.now(),  // wall-clock start, for the elapsed-time clock
+  elapsed: 0,                    // seconds since startTime (updated each frame)
+  pctPositive: 0,                // 0-100, positive.seconds / elapsed
 };
 
 const setStatus = msg => { ui.status.textContent = msg; };
@@ -231,6 +233,12 @@ function processFrame(src) {
   const positive = !!preds && POSITIVE_LABELS.has(preds[0].label);
   state.positive.feed(positive, nowS);
 
+  // --- elapsed-time clock (since the program started) + happy% ---
+  // A live ratio, not a separate accumulator: recomputed from the two
+  // stopwatches above, so it can only ever agree with what they show.
+  state.elapsed = nowS - state.startTime / 1000;
+  state.pctPositive = state.elapsed > 0 ? 100 * state.positive.seconds / state.elapsed : 0;
+
   // --- smile coach: happy time over face time, a spoken verdict when due ---
   if (state.coach) {
     const verdict = state.coach.feed(positive, !!preds, nowS);
@@ -273,8 +281,11 @@ function render(src, { face, blink, preds, rect, nowS }) {
   ctx.restore();
 
   // main indicators: not debug, so the overlay toggle does not hide them
-  if (ui.posTimer.checked) drawPositiveTimer(W, H);
-  if (ui.sessionClock.checked) drawSessionClock(W, H, nowS);
+  if (ui.posTimer.checked) {
+    const elapsedBottom = drawElapsedTimer(W, H);
+    const posBottom = drawPositiveTimer(W, H, elapsedBottom);
+    drawPositivePct(W, posBottom);
+  }
   if (state.coach) drawCoach(W, H, nowS);
 
   if (!ui.overlay.checked) return;
@@ -325,9 +336,12 @@ function render(src, { face, blink, preds, rect, nowS }) {
 /**
  * Cumulative positive time, top centre, big enough to read across a room.
  * Green with a dot while it runs, dimmed grey while it is stopped: the state
- * is legible at a glance without reading the digits.
+ * is legible at a glance without reading the digits. `topY`, when given,
+ * overrides the default top margin - used to stack this under the
+ * elapsed-time clock. Returns the box's bottom edge, so a caller can stack
+ * more readouts under it.
  */
-function drawPositiveTimer(W, H) {
+function drawPositiveTimer(W, H, topY = null) {
   const { seconds, running } = state.positive;
   const txt = formatDuration(seconds);
   const size = Math.max(18, Math.round(H / 10));
@@ -341,7 +355,7 @@ function drawPositiveTimer(W, H) {
   const gap = running ? r * 3 : 0;
   const tw = ctx.measureText(txt).width;
   const bw = tw + gap + padX * 2, bh = size + padY * 2;
-  const bx = (W - bw) / 2, by = size * 0.35, cy = by + bh / 2;
+  const bx = (W - bw) / 2, by = topY ?? size * 0.35, cy = by + bh / 2;
 
   ctx.fillStyle = "rgba(0,0,0,.55)";
   ctx.beginPath();
@@ -356,31 +370,42 @@ function drawPositiveTimer(W, H) {
   ctx.fillStyle = running ? green : grey;
   ctx.fillText(txt, bx + padX + gap, cy + size * 0.04);
   ctx.restore();
+  return by + bh;
 }
 
 /**
- * Wall-clock time since the page loaded, in a small pill under the stopwatch
- * (or in its place when the stopwatch is hidden). Elapsed time, not frames:
- * a background tab keeps counting.
+ * Wall-clock time since the program started, drawn directly above the
+ * positive-time stopwatch. It never stops, so there's no on/off state to
+ * signal - just a plain, constant readout. Returns its bottom edge, which
+ * becomes the stopwatch's topY so the two stack with no overlap.
  */
-function drawSessionClock(W, H, nowS) {
-  const txt = `session ${formatDuration(nowS - state.startS)}`;
-  const big = Math.max(18, Math.round(H / 10));   // the stopwatch's size, to sit right under it
-  const size = Math.max(12, Math.round(H / 30));
+function drawElapsedTimer(W, H) {
+  const txt = `elapsed ${formatDuration(state.elapsed)}`;
+  const size = Math.max(14, Math.round(H / 22));
   ctx.save();
   ctx.font = `500 ${size}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-  ctx.textBaseline = "middle";
+  ctx.textBaseline = "top";
   ctx.textAlign = "center";
-  const tw = ctx.measureText(txt).width;
-  const padX = size * 0.6, bh = size * 1.6;
-  const by = ui.posTimer.checked ? big * 0.35 + big * 1.6 + size * 0.4 : size * 0.6;
-  ctx.fillStyle = "rgba(0,0,0,.55)";
-  ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(W / 2 - tw / 2 - padX, by, tw + padX * 2, bh, bh * 0.3);
-  else ctx.rect(W / 2 - tw / 2 - padX, by, tw + padX * 2, bh);
-  ctx.fill();
   ctx.fillStyle = "rgba(255,255,255,.75)";
-  ctx.fillText(txt, W / 2, by + bh / 2 + size * 0.04);
+  const y = size * 0.5;
+  ctx.fillText(txt, W / 2, y);
+  ctx.restore();
+  return y + size * 1.4;
+}
+
+/**
+ * % of elapsed time spent positive, drawn directly under the stopwatch.
+ * Takes the stopwatch's own bottom edge so it always sits right beneath it
+ * regardless of the stopwatch's font size or running/stopped padding.
+ */
+function drawPositivePct(W, topY) {
+  const size = Math.max(14, Math.round(ui.canvas.height / 22));
+  ctx.save();
+  ctx.font = `500 ${size}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.textBaseline = "top";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(255,255,255,.75)";
+  ctx.fillText(`${state.pctPositive.toFixed(1)}% happy`, W / 2, topY + size * 0.3);
   ctx.restore();
 }
 
@@ -436,7 +461,7 @@ function publish({ face, blink, expr, preds, rect, hands }) {
     valence: expr?.valence ?? null, arousal: expr?.arousal ?? null, smile: expr?.smile ?? null,
     blink: blink ? { level: blink.level, closed: blink.closed, blinked: blink.blinked, count: blink.blinks, perMin: blink.perMin } : null,
     positiveTime: { seconds: state.positive.seconds, running: state.positive.running },
-    sessionS: performance.now() / 1000 - state.startS,
+    elapsed: state.elapsed, pctPositive: state.pctPositive,
     coach: state.coach ? {
       happyFrac: state.coach.fraction(), prevFrac: state.coach.prevFrac,
       nextInS: state.coach.nextInS(performance.now() / 1000), last: state.coach.last,
@@ -459,7 +484,9 @@ function renderStats(s) {
   if (ui.zoom.checked) lines.push(`zoom: ${state.zoom.state}`);
   if (s.valence !== null) lines.push(`valence ${s.valence.toFixed(2)}  arousal ${s.arousal.toFixed(2)}`);
   if (s.blink) lines.push(`blink: ${s.blink.count} (${s.blink.perMin.toFixed(0)}/min)`);
-  lines.push(`positive: ${formatDuration(s.positiveTime.seconds)} ${s.positiveTime.running ? "(running)" : "(stopped)"}  session: ${formatDuration(s.sessionS)}`);
+  lines.push(`elapsed: ${formatDuration(s.elapsed)}`);
+  lines.push(`positive: ${formatDuration(s.positiveTime.seconds)} ${s.positiveTime.running ? "(running)" : "(stopped)"}`);
+  lines.push(`${s.pctPositive.toFixed(1)}% of elapsed time`);
   if (s.coach) {
     const pct = v => v === null ? "--" : `${(v * 100).toFixed(0)}%`;
     lines.push(`coach: happy ${pct(s.coach.happyFrac)} (was ${pct(s.coach.prevFrac)})  next in ${formatDuration(s.coach.nextInS)}`);
@@ -496,7 +523,6 @@ for (const el of [ui.blink, ui.blinkMode, ui.blinkThresh, ui.hands, ui.handsHold
 ui.mirror.addEventListener("change", () => { state.dirty = true; });
 ui.overlay.addEventListener("change", () => { state.dirty = true; });
 ui.posTimer.addEventListener("change", () => { state.dirty = true; });
-ui.sessionClock.addEventListener("change", () => { state.dirty = true; });
 ui.zoom.addEventListener("change", () => { state.zoom.reset(); state.zoomRoi = null; state.dirty = true; });
 
 /** Panel settings of the coach, kept across reloads. */
