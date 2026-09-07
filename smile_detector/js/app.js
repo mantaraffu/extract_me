@@ -12,9 +12,13 @@ import { EmotionSmoother } from "./smoother.js";
 import { expressionsFromBlendshapes, LABELS } from "./expressions.js";
 import { PositiveTimer, formatDuration } from "./positive_timer.js";
 import { ZoomTracker } from "./zoom.js";
+import { SmileCoach, browserSpeaker } from "./coach.js";
 
 /** The emotion labels that make the positive-time stopwatch run. */
 const POSITIVE_LABELS = new Set(["happy"]);
+
+/** Seconds the spoken line stays on screen as a caption. */
+const COACH_CAPTION_S = 5;
 
 const $ = id => document.getElementById(id);
 const ui = {
@@ -24,6 +28,7 @@ const ui = {
   hands: $("hands"), handsHold: $("handsHold"), handsResetOn: $("handsResetOn"), handsReset: $("handsReset"),
   emotion: $("emotion"), vitEvery: $("vitEvery"),
   posTimer: $("posTimer"), zoom: $("zoom"),
+  coach: $("coach"), coachFirst: $("coachFirst"), coachEvery: $("coachEvery"), coachThresh: $("coachThresh"), coachTest: $("coachTest"),
   stats: $("stats"), bars: $("bars"),
 };
 const ctx = ui.canvas.getContext("2d");
@@ -40,6 +45,8 @@ const state = {
   positive: new PositiveTimer(),
   zoom: new ZoomTracker(),
   zoomRoi: null,     // region fed to the face detector next frame, null = full frame
+  coach: null,       // SmileCoach while the voice coach is on
+  speak: null,       // speak(text) on the Web Speech API, null where unavailable
   vit: null,
   vitPreds: null,
   frame: 0,
@@ -222,6 +229,13 @@ function processFrame(src) {
   const positive = !!preds && POSITIVE_LABELS.has(preds[0].label);
   state.positive.feed(positive, nowS);
 
+  // --- smile coach: happy time over face time, a spoken verdict when due ---
+  if (state.coach) {
+    const verdict = state.coach.feed(positive, !!preds, nowS);
+    if (verdict) console.log(`[coach] ${verdict.kind}: "${verdict.text}" happy=${(verdict.frac * 100).toFixed(0)}%`
+      + (verdict.prevFrac === null ? "" : ` (was ${(verdict.prevFrac * 100).toFixed(0)}%)`));
+  }
+
   // --- fps ---
   const t = performance.now();
   if (state.lastT !== null) {
@@ -256,8 +270,9 @@ function render(src, { face, blink, preds, rect, nowS }) {
   }
   ctx.restore();
 
-  // main indicator: not debug, so the overlay toggle does not hide it
+  // main indicators: not debug, so the overlay toggle does not hide them
   if (ui.posTimer.checked) drawPositiveTimer(W, H);
+  if (state.coach) drawCoach(W, H, nowS);
 
   if (!ui.overlay.checked) return;
   ctx.lineWidth = 2;
@@ -340,6 +355,43 @@ function drawPositiveTimer(W, H) {
   ctx.restore();
 }
 
+/**
+ * Coach readout at the bottom centre: the running happy share and the time to
+ * the next verdict, plus the last line spoken as a caption for a few seconds.
+ */
+function drawCoach(W, H, nowS) {
+  const c = state.coach;
+  const frac = c.fraction();
+  const prev = c.prevFrac;
+  const info = `happy ${frac === null ? "--" : (frac * 100).toFixed(0) + "%"}`
+    + (prev === null ? "" : `  (was ${(prev * 100).toFixed(0)}%)`)
+    + `  ·  next verdict in ${formatDuration(c.nextInS(nowS))}`;
+  const size = Math.max(14, Math.round(H / 32));
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `500 ${size}px system-ui, sans-serif`;
+  const infoW = ctx.measureText(info).width;
+  let y = H - size * 1.6;
+  ctx.fillStyle = "rgba(0,0,0,.55)";
+  ctx.fillRect(W / 2 - infoW / 2 - size * 0.6, y - size * 0.8, infoW + size * 1.2, size * 1.6);
+  ctx.fillStyle = "rgba(255,255,255,.85)";
+  ctx.fillText(info, W / 2, y);
+
+  const last = c.last;
+  if (last && nowS - last.atS < COACH_CAPTION_S) {
+    const big = Math.max(20, Math.round(H / 16));
+    ctx.font = `600 ${big}px system-ui, sans-serif`;
+    const tw = ctx.measureText(last.text).width;
+    y -= size * 1.6 + big;
+    ctx.fillStyle = "rgba(0,0,0,.65)";
+    ctx.fillRect(W / 2 - tw / 2 - big * 0.6, y - big * 0.85, tw + big * 1.2, big * 1.7);
+    ctx.fillStyle = last.kind === "encouragement" ? "#0f0" : "#f66";
+    ctx.fillText(last.text, W / 2, y);
+  }
+  ctx.restore();
+}
+
 function label(txt, x, y, bg, fg) {
   const w = ctx.measureText(txt).width + 8;
   ctx.fillStyle = bg; ctx.fillRect(x, y - 22, w, 22);
@@ -355,6 +407,10 @@ function publish({ face, blink, expr, preds, rect, hands }) {
     valence: expr?.valence ?? null, arousal: expr?.arousal ?? null, smile: expr?.smile ?? null,
     blink: blink ? { level: blink.level, closed: blink.closed, blinked: blink.blinked, count: blink.blinks, perMin: blink.perMin } : null,
     positiveTime: { seconds: state.positive.seconds, running: state.positive.running },
+    coach: state.coach ? {
+      happyFrac: state.coach.fraction(), prevFrac: state.coach.prevFrac,
+      nextInS: state.coach.nextInS(performance.now() / 1000), last: state.coach.last,
+    } : null,
     hands, palms: state.hands?.palms || {}, rect,
   };
   window.emotionState = s;
@@ -374,6 +430,11 @@ function renderStats(s) {
   if (s.valence !== null) lines.push(`valence ${s.valence.toFixed(2)}  arousal ${s.arousal.toFixed(2)}`);
   if (s.blink) lines.push(`blink: ${s.blink.count} (${s.blink.perMin.toFixed(0)}/min)`);
   lines.push(`positive: ${formatDuration(s.positiveTime.seconds)} ${s.positiveTime.running ? "(running)" : "(stopped)"}`);
+  if (s.coach) {
+    const pct = v => v === null ? "--" : `${(v * 100).toFixed(0)}%`;
+    lines.push(`coach: happy ${pct(s.coach.happyFrac)} (was ${pct(s.coach.prevFrac)})  next in ${formatDuration(s.coach.nextInS)}`);
+    if (s.coach.last) lines.push(`  last: ${s.coach.last.kind} "${s.coach.last.text}"`);
+  }
   if (state.hands) lines.push(`hands: ${s.hands}`);
   ui.stats.textContent = lines.join("\n");
   ui.bars.innerHTML = LABELS.map(l => {
@@ -407,6 +468,32 @@ ui.overlay.addEventListener("change", () => { state.dirty = true; });
 ui.posTimer.addEventListener("change", () => { state.dirty = true; });
 ui.zoom.addEventListener("change", () => { state.zoom.reset(); state.zoomRoi = null; state.dirty = true; });
 
+/**
+ * (Re)build the coach from the panel. Any change restarts it: the windows
+ * only make sense from the moment the settings were chosen.
+ */
+function syncCoach() {
+  if (!ui.coach.checked) { state.coach = null; state.dirty = true; return; }
+  if (!state.speak) {
+    state.speak = browserSpeaker();
+    if (!state.speak) setStatus("speech synthesis not available in this browser: the coach runs silently");
+  }
+  state.coach = new SmileCoach({
+    firstS: Math.max(5, parseFloat(ui.coachFirst.value) || 120),
+    everyS: Math.max(5, parseFloat(ui.coachEvery.value) || 60),
+    threshold: Math.min(1, Math.max(0, (parseFloat(ui.coachThresh.value) || 30) / 100)),
+    speak: state.speak,
+    nowS: performance.now() / 1000,
+  });
+  state.dirty = true;
+}
+for (const el of [ui.coach, ui.coachFirst, ui.coachEvery, ui.coachThresh]) el.addEventListener("change", syncCoach);
+ui.coachTest.addEventListener("click", () => {
+  // a click is the user activation Chrome wants before the page may speak
+  if (!state.speak) state.speak = browserSpeaker();
+  if (state.speak) state.speak("Smile coach ready"); else setStatus("speech synthesis not available in this browser");
+});
+
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
   if (e.key === "h") ui.panel.hidden = !ui.panel.hidden;
@@ -414,6 +501,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "m") { ui.mirror.checked = !ui.mirror.checked; state.dirty = true; }
   if (e.key === "r") { state.hands?.reset(performance.now() / 1000); state.dirty = true; }
   if (e.key === "t") { state.positive.reset(performance.now() / 1000); state.dirty = true; }
+  if (e.key === "c") { state.coach?.check(performance.now() / 1000); state.dirty = true; }
   if (e.key === "f") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
 });
 
@@ -432,6 +520,7 @@ document.addEventListener("drop", async e => {
   requestAnimationFrame(tick);
   await listCams();
   try { await syncModules(); } catch (e) { setStatus(`error: ${e.message}`); console.error(e); return; }
+  syncCoach();
   const params = new URLSearchParams(location.search);
   if (params.get("image")) {
     // ?image=url : test image without a camera (e.g. ?image=test.jpg)

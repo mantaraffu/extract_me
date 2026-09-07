@@ -2,8 +2,9 @@
 
 The evolution of the version at the repo root, kept separate so that one stays
 as it was. What is new here: a stopwatch of the time spent with a positive
-emotion, and an adaptive zoom that recovers faces past ~1.8 m, where the
-detector otherwise loses them entirely.
+emotion, an adaptive zoom that recovers faces past ~1.8 m, where the detector
+otherwise loses them entirely, and a voice coach that praises or scolds you
+every minute depending on how much you smiled.
 
 
 Face, emotion, blink and hand tracking entirely in the browser. No Python,
@@ -19,6 +20,7 @@ js/blink.js         BlinkCounter: blendshape or EAR, time-based counting
 js/hands.js         HandsTracker: two-palm rectangle, smoothing, hold, reset
 js/smoother.js      EmotionSmoother: EMA + hysteresis on the label
 js/positive_timer.js PositiveTimer: stopwatch of the time spent smiling
+js/coach.js         SmileCoach: periodic spoken verdicts on the happy share
 js/zoom.js          ZoomTracker: adaptive crop for detection at a distance
 js/expressions.js   blendshapes -> 7 emotions + valence/arousal (heuristic)
 serve.py            static server with caching disabled
@@ -41,7 +43,7 @@ Sources other than the webcam:
   (handy for testing without a camera; `test.jpg` is git-ignored).
 
 Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
-`t` reset stopwatch.
+`t` reset stopwatch, `c` coach verdict now.
 
 ## What it does
 - **Face**: FaceLandmarker (478 points + 52 blendshapes) in VIDEO mode with
@@ -73,6 +75,22 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   credit the whole pause. It is an indicator, not debug, so the `o` overlay
   toggle does not hide it; `t` resets it. Since it reads the smoothed label, it
   is inactive with emotion set to *off*.
+- **Smile coach** (voice, off by default): a spoken verdict on the share of
+  time the face was `happy`. The first one comes after 2 minutes: at least 30%
+  is praise, less is a scolding. From then on every minute the new window is
+  compared with the previous one: smiling more than before moves one step
+  along the encouragements list, smiling less moves one step along the
+  reprimands list. Each list keeps its own cursor and wraps around at the end,
+  so the tone escalates instead of repeating. A tie falls back to the 30%
+  threshold. The share is over the time a face was visible, not wall-clock
+  time, and a window with less than 10 s of face is skipped in silence, so an
+  empty room is never scolded. Speech is the browser's Web Speech API with an
+  English system voice; Chrome only speaks after a click on the page, which
+  ticking the checkbox or pressing "test voice" provides. Both lists live at
+  the top of `coach.js`. The running share, the previous one and the countdown
+  to the next verdict sit at the bottom of the canvas; the spoken line stays
+  there as a caption for 5 s. Timings and threshold are in the panel; `c`
+  forces a verdict now.
 - **Distance**: the detector bundled in `face_landmarker.task` is BlazeFace
   short-range, which resizes the whole frame to about 128 px before looking at
   it. What decides detection is the *fraction* of the frame the face covers,
@@ -103,7 +121,7 @@ Every frame the page writes `window.emotionState` and dispatches the
 ```js
 window.addEventListener("emotionscript", e => {
   const s = e.detail;   // {fps, face, box, emotion, probs, valence, arousal,
-                      //  blink, positiveTime, hands, palms, rect}
+                      //  blink, positiveTime, coach, hands, palms, rect}
 });
 ```
 This is the hook for a p5.js sketch, a WebGL canvas or any other

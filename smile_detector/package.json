@@ -1,7 +1,7 @@
 {
   "name": "smile_detector",
   "version": "0.1.0",
-  "description": "Face, emotion, blink and hand tracking in the browser, with a positive-emotion stopwatch and adaptive zoom for distant faces",
+  "description": "Face, emotion, blink and hand tracking in the browser, with a positive-emotion stopwatch, adaptive zoom for distant faces and a voice smile coach",
   "type": "module",
   "private": true,
   "scripts": {

@@ -59,10 +59,19 @@
     <label><input id="posTimer" type="checkbox" checked> stopwatch of positive time</label>
   </fieldset>
 
+  <fieldset>
+    <legend><label><input id="coach" type="checkbox"> smile coach (voice)</label></legend>
+    <p class="hint">first verdict after <input id="coachFirst" type="number" step="1" min="5" value="120"> s:
+    happy for at least <input id="coachThresh" type="number" step="1" min="0" max="100" value="30">% of the
+    time with a face is praise, less is a scolding. Then every <input id="coachEvery" type="number" step="1" min="5" value="60"> s:
+    smiling more than in the previous window moves one step along the encouragements, less moves one step along the reprimands.</p>
+    <button id="coachTest" type="button">test voice</button>
+  </fieldset>
+
   <pre id="stats"></pre>
   <div id="bars"></div>
 
-  <p class="hint">keys: <b>h</b> panel · <b>o</b> overlay · <b>m</b> mirror · <b>f</b> fullscreen · <b>r</b> reset rect · <b>t</b> reset stopwatch<br>
+  <p class="hint">keys: <b>h</b> panel · <b>o</b> overlay · <b>m</b> mirror · <b>f</b> fullscreen · <b>r</b> reset rect · <b>t</b> reset stopwatch · <b>c</b> coach verdict now<br>
   drag a video or an image onto the page to use it as the source.<br>
   per-frame state in <code>window.emotionState</code> and the <code>emotionscript</code> event.</p>
 </aside>

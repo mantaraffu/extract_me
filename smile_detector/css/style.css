@@ -22,3 +22,6 @@ legend { padding: 0 4px; color: #bbb; }
 .bar b { font-weight: normal; color: #999; text-align: right; }
 .hint { color: #888; font-size: 11px; margin: 10px 0 0; }
 .hint b, .hint code { color: #bbb; }
+#panel button { margin-top: 6px; background: #222; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+#panel button:hover { background: #333; }
+.hint input[type=number] { width: 3.5em; padding: 1px 3px; font-size: 11px; }
