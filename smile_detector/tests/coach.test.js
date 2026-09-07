@@ -128,18 +128,38 @@ test("the fraction is over face time, not wall-clock time", () => {
   assert.ok(Math.abs(v[0].visibleS - 60) < 0.2);
 });
 
-test("too little face: silent, the window restarts and the previous reading stays", () => {
+test("a verdict comes at every deadline, even with almost no face", () => {
   const spoken = [];
   const c = coachWith(spoken);
   run(c, 0, 120, 0.5);                 // enc 0, prev = 0.5
   run(c, 120, 55, 0, false);
-  const v = run(c, 175, 5, 1.0);       // only 5 s of face in this window
-  assert.deepEqual(v, []);
-  assert.deepEqual(spoken, [ENCOURAGEMENTS[0]]);
-  assert.ok(Math.abs(c.prevFrac - 0.5) < 0.02);
+  const v = run(c, 175, 5, 1.0);       // only 5 s of face in this window, all of it happy
+  assert.equal(v.length, 1);
+  assert.equal(v[0].kind, "encouragement");   // 100% > 50%
+  assert.ok(Math.abs(c.prevFrac - 1.0) < 0.02);
   assert.ok(Math.abs(c.nextInS(180) - 60) < 1e-9);
-  const later = run(c, 180, 60, 0.6);  // compared with 0.5, not with the skipped window
+});
+
+test("no face at all: counts as 0% happy, the previous reading is kept", () => {
+  const spoken = [];
+  const c = coachWith(spoken);
+  run(c, 0, 120, 0.5);                 // enc 0, prev = 0.5
+  const v = run(c, 120, 60, 0, false); // empty room for a whole window
+  assert.equal(v.length, 1);
+  assert.equal(v[0].kind, "reprimand");       // 0% < 50%
+  assert.equal(v[0].frac, 0);
+  assert.ok(Math.abs(c.prevFrac - 0.5) < 0.02);   // still the last measured value
+  const later = run(c, 180, 60, 0.6);  // compared with 0.5, not with the empty window
   assert.equal(later[0].kind, "encouragement");
+  assert.deepEqual(spoken, [ENCOURAGEMENTS[0], REPRIMANDS[0], ENCOURAGEMENTS[1]]);
+});
+
+test("first window with no face: a reprimand, and the next verdict is still the first real one", () => {
+  const c = coachWith([]);
+  const v = run(c, 0, 120, 0, false);
+  assert.equal(v[0].kind, "reprimand");
+  assert.equal(c.prevFrac, null);
+  assert.ok(Math.abs(c.nextInS(120) - 60) < 1e-9);
 });
 
 test("check() forces the verdict now and restarts the clock", () => {

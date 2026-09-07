@@ -83,8 +83,10 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   reprimands list. Each list keeps its own cursor and wraps around at the end,
   so the tone escalates instead of repeating. A tie falls back to the 30%
   threshold. The share is over the time a face was visible, not wall-clock
-  time, and a window with less than 10 s of face is skipped in silence, so an
-  empty room is never scolded. Speech is the browser's Web Speech API with an
+  time. A verdict comes at every deadline, no exceptions: a window with no
+  face at all counts as 0% happy, but does not replace the previous reading,
+  so the next comparison still starts from the last share actually measured
+  (the "was 35%" on screen). Speech is the browser's Web Speech API with an
   English system voice. Chrome only speaks after a click on the page: a line
   it refuses shows "voice blocked" in the status line and is said at the next
   click anywhere. The status line also echoes each line as it is spoken, so a

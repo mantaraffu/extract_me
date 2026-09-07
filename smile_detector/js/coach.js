@@ -11,9 +11,10 @@
  * than repeating the same line.
  *
  * The fraction is happy seconds over seconds with a face visible, not over
- * wall-clock time: a window with less than `minVisibleS` of face is skipped
- * in silence and does not become the "previous" reading, so the coach never
- * scolds an empty room.
+ * wall-clock time. A verdict comes at every deadline, no exceptions: a window
+ * in which no face was seen counts as 0% happy (no smile was shown), but it
+ * does not replace the previous reading, so the next comparison still starts
+ * from the last fraction actually measured.
  *
  * Pure logic: time comes in through `feed`/`check`, speech goes out through
  * the injected `speak(text)` callback (see `browserSpeaker`).
@@ -44,14 +45,13 @@ export const REPRIMANDS = [
 
 export class SmileCoach {
   constructor({
-    firstS = 120, everyS = 60, threshold = 0.3, minVisibleS = 10,
+    firstS = 120, everyS = 60, threshold = 0.3,
     encouragements = ENCOURAGEMENTS, reprimands = REPRIMANDS,
     speak = null, nowS = 0,
   } = {}) {
     this.firstS = firstS;
     this.everyS = everyS;
     this.threshold = threshold;
-    this.minVisibleS = minVisibleS;
     this.encouragements = encouragements;
     this.reprimands = reprimands;
     this.speak = speak;
@@ -91,19 +91,14 @@ export class SmileCoach {
     return nowS >= this.dueS ? this.check(nowS) : null;
   }
 
-  /**
-   * Close the current window now and deliver its verdict (null when the face
-   * was seen too briefly). The next window starts here either way.
-   */
+  /** Close the current window now and deliver its verdict; the next window starts here. */
   check(nowS) {
-    const frac = this.fraction();
+    const measured = this.fraction();      // null when no face was seen at all
+    const frac = measured ?? 0;
     const visibleS = this.visible.seconds;
     const prev = this.prevFrac;
     this.happy.reset(nowS);
     this.visible.reset(nowS);
-    this.dueS = nowS + (prev === null ? this.firstS : this.everyS);
-
-    if (frac === null || visibleS < this.minVisibleS) return null;
 
     // Better than last time is praise, worse is a scolding; the very first
     // verdict, and a tie, fall back to the threshold.
@@ -119,7 +114,7 @@ export class SmileCoach {
       this.repIdx = (this.repIdx + 1) % this.reprimands.length;
       text = this.reprimands[this.repIdx];
     }
-    this.prevFrac = frac;
+    if (measured !== null) this.prevFrac = frac;   // an unseen face leaves the reference alone
     this.dueS = nowS + this.everyS;
     this.last = { kind: good ? "encouragement" : "reprimand", text, frac, prevFrac: prev, visibleS, atS: nowS };
     if (this.speak) this.speak(text);
