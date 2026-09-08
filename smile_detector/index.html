@@ -68,10 +68,19 @@
     <button id="coachTest" type="button">test voice</button>
   </fieldset>
 
+  <fieldset>
+    <legend><label><input id="saveLog" type="checkbox" checked> save session JSON to the Desktop</label></legend>
+    <p class="hint">blinks, time smiling and not, emotions, hands, coach verdicts and a per-minute
+    timeline. Written when the page closes, every 30 s, and on demand. Needs the bundled server
+    (<code>npm run serve</code>).</p>
+    <button id="saveNow" type="button">save now</button>
+    <p class="hint" id="saveInfo"></p>
+  </fieldset>
+
   <pre id="stats"></pre>
   <div id="bars"></div>
 
-  <p class="hint">keys: <b>h</b> panel · <b>o</b> overlay · <b>m</b> mirror · <b>f</b> fullscreen · <b>r</b> reset rect · <b>t</b> reset stopwatch and % happy · <b>c</b> coach verdict now<br>
+  <p class="hint">keys: <b>h</b> panel · <b>o</b> overlay · <b>m</b> mirror · <b>f</b> fullscreen · <b>r</b> reset rect · <b>t</b> reset stopwatch and % happy · <b>c</b> coach verdict now · <b>s</b> save session<br>
   drag a video or an image onto the page to use it as the source.<br>
   per-frame state in <code>window.emotionState</code> and the <code>emotionscript</code> event.</p>
 </aside>

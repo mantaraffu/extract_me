@@ -21,9 +21,10 @@ js/hands.js         HandsTracker: two-palm rectangle, smoothing, hold, reset
 js/smoother.js      EmotionSmoother: EMA + hysteresis on the label
 js/positive_timer.js PositiveTimer: stopwatch of the time spent smiling
 js/coach.js         SmileCoach: periodic spoken verdicts on the happy share
+js/session_log.js   SessionLog: everything measured, written as JSON on the Desktop
 js/zoom.js          ZoomTracker: adaptive crop for detection at a distance
 js/expressions.js   blendshapes -> 7 emotions + valence/arousal (heuristic)
-serve.py            static server with caching disabled
+serve.py            static server with caching disabled + POST /save to the Desktop
 tests/              Node tests for the pure logic (npm test)
 ```
 
@@ -43,7 +44,7 @@ Sources other than the webcam:
   (handy for testing without a camera; `test.jpg` is git-ignored).
 
 Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
-`t` reset stopwatch, `c` coach verdict now.
+`t` reset stopwatch, `c` coach verdict now, `s` save the session JSON.
 
 ## What it does
 - **Face**: FaceLandmarker (478 points + 52 blendshapes) in VIDEO mode with
@@ -101,6 +102,21 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   being read, so an empty room neither adds nor subtracts, and the share is a
   live ratio of the two stopwatches rather than a third accumulator. `t`
   resets both. In the published state: `elapsed`, `faceTime`, `pctPositive`.
+- **Session JSON on the Desktop**: everything the session measured, written
+  to `~/Desktop/smile_session_<start time>.json` when the page closes (close,
+  reload or navigation away, via `sendBeacon`), every 30 s as a safety net,
+  and on demand with the panel button or `s`. One file per session, kept up
+  to date. It holds: elapsed time, seconds with and without a face, seconds
+  smiling and not smiling with the share of face time, seconds per emotion
+  label with mean valence and arousal, blink count and rate, hands (seconds
+  with one and two hands, seconds with the rect up and how many times it
+  appeared, total palm travel in pixels and in frame widths), every coach
+  verdict with its instant and shares, and a per-minute timeline of face,
+  smiling, blinks and hands. The page cannot write files by itself, so the
+  bundled `serve.py` accepts `POST /save?name=smile_session_...json` and
+  writes it; another static server serves the app fine but saves nothing, and
+  the panel says so. `SMILE_SAVE_DIR=/some/dir python3 serve.py` changes the
+  folder.
 - **Distance**: the detector bundled in `face_landmarker.task` is BlazeFace
   short-range, which resizes the whole frame to about 128 px before looking at
   it. What decides detection is the *fraction* of the frame the face covers,

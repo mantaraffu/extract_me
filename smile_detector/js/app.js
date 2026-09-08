@@ -13,12 +13,16 @@ import { expressionsFromBlendshapes, LABELS } from "./expressions.js";
 import { PositiveTimer, formatDuration } from "./positive_timer.js";
 import { ZoomTracker } from "./zoom.js";
 import { SmileCoach, browserSpeaker } from "./coach.js";
+import { SessionLog, sessionFileName } from "./session_log.js";
 
 /** The emotion labels that make the positive-time stopwatch run. */
 const POSITIVE_LABELS = new Set(["happy"]);
 
 /** Seconds the spoken line stays on screen as a caption. */
 const COACH_CAPTION_S = 5;
+
+/** Seconds between automatic saves of the session JSON. */
+const AUTOSAVE_S = 30;
 
 const $ = id => document.getElementById(id);
 const ui = {
@@ -29,6 +33,7 @@ const ui = {
   emotion: $("emotion"), vitEvery: $("vitEvery"),
   posTimer: $("posTimer"), zoom: $("zoom"),
   coach: $("coach"), coachFirst: $("coachFirst"), coachEvery: $("coachEvery"), coachThresh: $("coachThresh"), coachTest: $("coachTest"),
+  saveLog: $("saveLog"), saveNow: $("saveNow"), saveInfo: $("saveInfo"),
   stats: $("stats"), bars: $("bars"),
 };
 const ctx = ui.canvas.getContext("2d");
@@ -49,6 +54,8 @@ const state = {
   coach: null,       // SmileCoach while the voice coach is on
   speak: null,       // speak(text) on the Web Speech API, null where unavailable
   blockedText: null, // a line the browser refused to speak, retried on the next click
+  log: null,         // SessionLog, created with the first frame so it knows the frame width
+  logFile: null,     // file name of this session on the Desktop
   vit: null,
   vitPreds: null,
   frame: 0,
@@ -247,9 +254,21 @@ function processFrame(src) {
     // the reference is the session share above, so "was" is that number
     const ref = state.faceTime.seconds > 0 ? state.pctPositive / 100 : null;
     const verdict = state.coach.feed(positive, !!preds, nowS, ref);
+    if (verdict) state.log?.verdict(verdict, nowS);
     if (verdict) console.log(`[coach] ${verdict.kind}: "${verdict.text}" happy=${(verdict.frac * 100).toFixed(0)}%`
       + (verdict.prevFrac === null ? "" : ` (was ${(verdict.prevFrac * 100).toFixed(0)}%)`));
   }
+
+  // --- session log: everything above, accumulated for the JSON on the Desktop ---
+  if (!state.log) {
+    state.log = new SessionLog({ startedAt: Date.now(), nowS, frameWidth: W });
+    state.logFile = sessionFileName(state.log.startedAt);
+  }
+  state.log.feed({
+    nowS, label: preds ? preds[0].label : null, positive,
+    valence: expr?.valence ?? null, arousal: expr?.arousal ?? null,
+    blinked: !!blink?.blinked, hands: det.hands.length, palms: state.hands?.palms || null, rect: !!rect,
+  });
 
   // --- fps ---
   const t = performance.now();
@@ -590,8 +609,36 @@ ui.coachTest.addEventListener("click", () => {
   if (ensureSpeaker()) state.speak("Smile coach ready"); else setStatus("speech synthesis not available in this browser");
 });
 
+/**
+ * Session JSON to the Desktop through the local server. `sendBeacon` is the
+ * one request a page may still make while it is being closed; the manual save
+ * uses fetch so the reply (the path written) can be shown.
+ */
+function sessionBody(reason) {
+  return JSON.stringify(state.log.toJSON({ nowS: performance.now() / 1000, reason }), null, 2);
+}
+function saveSession(reason) {
+  if (!state.log || !ui.saveLog.checked) return;
+  const url = `save?name=${encodeURIComponent(state.logFile)}`;
+  const body = new Blob([sessionBody(reason)], { type: "application/json" });
+  if (reason === "close") { navigator.sendBeacon(url, body); return; }
+  fetch(url, { method: "POST", body })
+    .then(async r => {
+      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+      const { path } = await r.json();
+      ui.saveInfo.textContent = `saved ${path} (${reason}, ${new Date().toLocaleTimeString()})`;
+    })
+    .catch(e => { ui.saveInfo.textContent = `save failed: ${e.message}. Serve with serve.py (npm run serve).`; });
+}
+setInterval(() => saveSession("autosave"), AUTOSAVE_S * 1000);
+window.addEventListener("pagehide", () => saveSession("close"));   // close, reload, navigation away
+ui.saveNow.addEventListener("click", () => saveSession("manual"));
+ui.saveLog.addEventListener("change", () => { try { localStorage.setItem("smile_detector.saveLog", ui.saveLog.checked ? "1" : "0"); } catch {} });
+try { if (localStorage.getItem("smile_detector.saveLog") === "0") ui.saveLog.checked = false; } catch {}
+
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (e.key === "s") saveSession("manual");
   if (e.key === "h") ui.panel.hidden = !ui.panel.hidden;
   if (e.key === "o") { ui.overlay.checked = !ui.overlay.checked; state.dirty = true; }
   if (e.key === "m") { ui.mirror.checked = !ui.mirror.checked; state.dirty = true; }
