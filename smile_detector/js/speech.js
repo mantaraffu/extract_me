@@ -276,6 +276,9 @@ export async function voskListener({
   // Its output buffer is never written, so it feeds the speakers silence.
   const proc = ctx.createScriptProcessor(4096, 1, 1);
   const stats = { chunks: 0, state: "starting", source: null, rms: 0 };
+  // An AudioContext built before any gesture starts suspended, and a suspended
+  // context delivers no audio at all: chunks stay at 0, exactly as they would
+  // with no microphone. The first click resumes it, `context` records which.
   statsState = (st, d) => { stats.state = d ? `${st}: ${d}` : st; };
   proc.onaudioprocess = e => {
     stats.chunks++;
@@ -326,7 +329,7 @@ export async function voskListener({
 
   return {
     setSource,
-    get stats() { return { ...stats, source: kind }; },
+    get stats() { return { ...stats, source: kind, context: ctx.state }; },
     get mode() { return router.mode; },
     get source() { return kind; },
     async resume() { if (ctx.state === "suspended") await ctx.resume(); },

@@ -748,14 +748,27 @@ async function initSpeech() {
       starting = false;
     }
   }
-  document.addEventListener("click", () => { startListening(); listener?.resume(); });
-  try { if (localStorage.getItem(SPEECH_KEY) === "1" && ui.speech) ui.speech.checked = true; } catch {}
+  // Any gesture will do to resume a suspended context, and this page is driven
+  // as much by keys as by clicks: a kiosk may never see a click at all.
+  for (const ev of ["click", "keydown"]) {
+    document.addEventListener(ev, () => { startListening(); listener?.resume(); });
+  }
+  // A restored switch is a promise the page has to keep. Assigning .checked
+  // fires no change event, so persisting it left the box claiming to be on
+  // while nothing had started - the switch lied, and every session after it
+  // logged an empty transcript.
+  try {
+    if (localStorage.getItem(SPEECH_KEY) === "1" && ui.speech) {
+      ui.speech.checked = true;
+      startListening();
+    }
+  } catch {}
   ui.speech?.addEventListener("change", () => {
     try { localStorage.setItem(SPEECH_KEY, ui.speech.checked ? "1" : "0"); } catch {}
     if (ui.speech.checked) startListening();
     else { listener?.stop(); listener = null; state.speechListener = null; }
   });
-  setSpeechInfo("click anywhere to start listening");
+  if (!ui.speech?.checked) setSpeechInfo("switch speech on to start listening");
 }
 if (window.SMILE_SPEECH) initSpeech();
 
