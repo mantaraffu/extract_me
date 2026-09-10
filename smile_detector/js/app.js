@@ -60,6 +60,7 @@ const state = {
   speech: null,      // SpeechRouter on the voice entry point, null on index.html
   speechListener: null,  // the Vosk listener, so the source switch can retarget its audio
   speechFailure: null,   // why it would not start, kept for the session JSON
+  speechPhase: "idle",   // how far the start got: "never checked" and "hung at step N" look alike otherwise
   speak: null,       // speak(text) on the Web Speech API, null where unavailable
   blockedText: null, // a line the browser refused to speak, retried on the next click
   log: null,         // SessionLog, created with the first frame so it knows the frame width
@@ -642,6 +643,7 @@ ui.coachTest.addEventListener("click", () => {
  * AudioContext may not be resumed before a gesture.
  */
 const SPEECH_KEY = "smile_detector.speech";
+let starting_ish = () => false;
 async function initSpeech() {
   const { SpeechRouter, COMMANDS, voskListener } = await import("./speech.js");
   const { ENCOURAGEMENTS, REPRIMANDS, STEADY } = await import("./coach.js");
@@ -697,34 +699,49 @@ async function initSpeech() {
     });
   }
 
+  const withTimeout = (ms, what, p) => Promise.race([
+    p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} within ${ms / 1000}s`)), ms)),
+  ]);
+
   let listener = null, starting = false, failure = null;
+  starting_ish = () => starting;
   /**
    * Every click retries this, so `starting` matters: without it a second click
    * during the model load - 39 MB, seconds of it - would begin a second one,
    * and the two would race.
    */
   async function startListening() {
-    if (listener || starting || !ui.speech?.checked) return;
+    if (listener || starting || !ui.speech?.checked) {
+      if (!ui.speech?.checked) state.speechPhase = "switch off";
+      return;
+    }
     starting = true;
     setSpeechInfo("loading the model, this takes a few seconds...");
     try {
+      state.speechPhase = "loading the library";
       const vosk = await loadVosk(ui.speechLib?.value || "vendor/vosk-browser.js");
-      const l = await voskListener({
+      state.speechPhase = "loading the model";
+      // A load that neither resolves nor rejects leaves no trace at all: the
+      // worker just never answers. Time it out so a hang becomes an error.
+      const l = await withTimeout(120000, "the model did not load", voskListener({
         vosk,
         modelUrl: ui.speechModel?.value || "vendor/vosk-model-small-en-us-0.15.tar.gz",
         commands: COMMANDS, router: state.speech, element: video,
         speaking: () => !!(window.speechSynthesis && window.speechSynthesis.speaking),
         onState: (s, d) => setSpeechInfo(d ? `${s}: ${d}` : s),
-      });
+      }));
+      state.speechPhase = "opening the audio";
       await l.setSource(state.source?.kind || "webcam");
       listener = l;
       state.speechListener = l;
+      state.speechPhase = "listening";
       failure = null;
     } catch (e) {
       // the panel is easy to miss and the console is not always open: the
       // session file has to carry this too, or the failure leaves no trace
       failure = `${e.name || "Error"}: ${e.message || e}`;
-      state.speechFailure = `failed: ${failure}`;
+      state.speechFailure = `failed while ${state.speechPhase}: ${failure}`;
+      state.speechPhase = `failed while ${state.speechPhase}`;
       console.error("[speech] cannot start:", e);
       setSpeechInfo(`speech off - ${failure}`);
     } finally {
@@ -753,7 +770,11 @@ function sessionBody(reason) {
   if (state.log && state.speech) {
     state.log.speechStats({
       ...state.speech.stats,
-      ...(state.speechListener?.stats || { listener: state.speechFailure || "never started" }),
+      ...(state.speechListener?.stats || {
+        listener: state.speechFailure || (starting_ish() ? `still ${state.speechPhase}` : "never started"),
+      }),
+      phase: state.speechPhase,
+      checkbox: ui.speech ? (ui.speech.checked ? "on" : "off") : "absent",
     });
   }
   return JSON.stringify(state.log.toJSON({ nowS: performance.now() / 1000, reason }), null, 2);
