@@ -15,6 +15,16 @@
  * open until nothing new has arrived for `freeSilenceS`, with `freeMaxS` as
  * the hard ceiling for whoever never stops.
  *
+ * Silence before the visitor has started is a different thing from silence
+ * after they finished, and treating them alike closed the window on anyone who
+ * paused to think: `freeLeadS` is the time they get to begin, and only once
+ * something has been said does `freeSilenceS` take over.
+ *
+ * The switch to free mode happens on the command's own final result, so the
+ * tail of that phrase - the "me" of "tell me" - is still in the audio the free
+ * recognizer then receives, and it opened every window with a stray word. A
+ * first result that is just an echo of the opening command is dropped.
+ *
  * The coach speaks through the same room the microphone listens to. In command
  * mode the grammar already protects us: the coach's lines are not in the word
  * list, so they decode to `[unk]`. In free mode they would be transcribed, so
@@ -56,7 +66,7 @@ export function grammar(commands = COMMANDS) {
 export class SpeechRouter {
   constructor({
     commands = COMMANDS, openFree = OPEN_FREE,
-    freeMaxS = 20, freeSilenceS = 1.5,
+    freeMaxS = 20, freeSilenceS = 1.5, freeLeadS = 4,
     coachPhrases = [],
     onCommand = null, onFree = null, nowS = 0,
   } = {}) {
@@ -64,6 +74,7 @@ export class SpeechRouter {
     this.openFree = normalize(openFree);
     this.freeMaxS = freeMaxS;
     this.freeSilenceS = freeSilenceS;
+    this.freeLeadS = freeLeadS;   // grace to start talking, before freeSilenceS applies
     this.coachPhrases = new Set(coachPhrases.map(normalize));
     this.onCommand = onCommand;
     this.onFree = onFree;
@@ -84,8 +95,11 @@ export class SpeechRouter {
   /** Seconds left before the free window closes on its own, null in command mode. */
   freeLeftS(nowS) {
     if (this.mode !== "free") return null;
-    return Math.max(0, Math.min(this.freeMaxS - (nowS - this.openedS),
-                                this.freeSilenceS - (nowS - this.lastSpeechS)));
+    const ceiling = this.freeMaxS - (nowS - this.openedS);
+    const near = this.parts.length
+      ? this.freeSilenceS - (nowS - this.lastSpeechS)
+      : this.freeLeadS - (nowS - this.openedS);
+    return Math.max(0, Math.min(ceiling, near));
   }
 
   /**
@@ -108,8 +122,9 @@ export class SpeechRouter {
     }
 
     // free mode
-    this.lastSpeechS = nowS;
     if (!final || !clean || clean === UNK) return null;
+    if (!this.parts.length && this.echoesOpen(clean)) return null;   // tail of "tell me"
+    this.lastSpeechS = nowS;
     if (this.coachPhrases.has(clean)) return null;         // the coach, verbatim
     this.parts.push(clean);
     if (conf !== null) this.confs.push(conf);
@@ -119,9 +134,19 @@ export class SpeechRouter {
   /** Drives the timeouts; call it once per frame with the current instant. */
   tick(nowS) {
     if (this.mode !== "free") return null;
-    const quiet = nowS - this.lastSpeechS >= this.freeSilenceS;
+    const started = this.parts.length > 0;
+    const quiet = started
+      ? nowS - this.lastSpeechS >= this.freeSilenceS
+      : nowS - this.openedS >= this.freeLeadS;      // nobody ever started
     const expired = nowS - this.openedS >= this.freeMaxS;
     return quiet || expired ? this.closeWindow(nowS, expired && !quiet ? "timeout" : "silence") : null;
+  }
+
+  /** Is this the tail of the command that opened the window, rather than speech? */
+  echoesOpen(clean) {
+    const open = this.openFree;
+    if (!open || !clean) return false;
+    return open === clean || open.endsWith(` ${clean}`) || open.startsWith(`${clean} `);
   }
 
   openWindow(nowS) {

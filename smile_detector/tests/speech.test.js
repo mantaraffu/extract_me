@@ -79,9 +79,9 @@ test("free window: the hard ceiling closes it on whoever never stops", () => {
 });
 
 test("an empty window closes without producing a segment", () => {
-  const { r, segments } = routerWith({ freeSilenceS: 1 });
+  const { r, segments } = routerWith({ freeSilenceS: 1, freeLeadS: 1 });
   say(r, OPEN_FREE, 0);
-  assert.equal(r.tick(1.5), null);
+  assert.equal(r.tick(1.5), null);       // the lead-in ran out with nothing said
   assert.equal(r.mode, "command");
   assert.deepEqual(segments, []);
 });
@@ -122,10 +122,10 @@ test("confidence is averaged over the window", () => {
 });
 
 test("freeLeftS counts down, and is null in command mode", () => {
-  const { r } = routerWith({ freeMaxS: 20, freeSilenceS: 2 });
+  const { r } = routerWith({ freeMaxS: 20, freeSilenceS: 2, freeLeadS: 2 });
   assert.equal(r.freeLeftS(0), null);
   say(r, OPEN_FREE, 0);
-  assert.equal(r.freeLeftS(0.5), 1.5);        // silence is the nearer deadline
+  assert.equal(r.freeLeftS(0.5), 1.5);        // the lead-in is the nearer deadline
 });
 
 test("reset drops an open window", () => {
@@ -140,4 +140,68 @@ test("reset drops an open window", () => {
 
 test("COMMANDS contains the opening command", () => {
   assert.ok(COMMANDS.map(normalize).includes(normalize(OPEN_FREE)));
+});
+
+test("the tail of the opening command does not become the transcript", () => {
+  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
+  say(r, OPEN_FREE, 0);
+  say(r, "me", 0.1);                     // the "me" of "tell me", still in the audio
+  assert.deepEqual(r.parts, []);
+  say(r, "i came here with my sister", 1.0);
+  const seg = r.tick(2.6);
+  assert.equal(seg.text, "i came here with my sister");
+  assert.equal(segments.length, 1);
+});
+
+test("the whole opening command echoed back is dropped too", () => {
+  const { r } = routerWith({ freeLeadS: 4 });
+  say(r, OPEN_FREE, 0);
+  say(r, "tell me", 0.1);
+  assert.deepEqual(r.parts, []);
+});
+
+test("an echo is only dropped first: the same word later is real speech", () => {
+  const { r } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
+  say(r, OPEN_FREE, 0);
+  say(r, "it was funny", 0.5);
+  say(r, "me", 1.0);                     // now it is something the visitor said
+  const seg = r.tick(2.6);
+  assert.equal(seg.text, "it was funny me");
+});
+
+test("a visitor who pauses to think keeps the window", () => {
+  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
+  say(r, OPEN_FREE, 0);
+  assert.equal(r.tick(2), null);         // 2 s of thinking: the old rule closed here
+  assert.equal(r.tick(3.5), null);
+  say(r, "i think it was strange", 3.8);
+  const seg = r.tick(5.4);
+  assert.equal(seg.text, "i think it was strange");
+  assert.equal(segments.length, 1);
+});
+
+test("but a window nobody ever speaks into still closes on the lead-in", () => {
+  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
+  say(r, OPEN_FREE, 0);
+  assert.equal(r.tick(3.9), null);
+  assert.equal(r.tick(4.1), null);       // closed, but empty: no segment
+  assert.equal(r.mode, "command");
+  assert.deepEqual(segments, []);
+});
+
+test("once speech started, the shorter silence rule takes over again", () => {
+  const { r } = routerWith({ freeSilenceS: 1.5, freeLeadS: 10 });
+  say(r, OPEN_FREE, 0);
+  say(r, "done", 0.5);
+  assert.equal(r.tick(1.5), null);
+  const seg = r.tick(2.1);               // 1.6 s after the words, not the 10 s lead
+  assert.equal(seg.text, "done");
+});
+
+test("freeLeftS counts the lead-in before anything is said", () => {
+  const { r } = routerWith({ freeMaxS: 20, freeSilenceS: 1.5, freeLeadS: 4 });
+  say(r, OPEN_FREE, 0);
+  assert.equal(r.freeLeftS(1), 3);       // the lead, not the 1.5 s silence
+  say(r, "hello", 1);
+  assert.equal(r.freeLeftS(1.5), 1);     // now the silence rule
 });

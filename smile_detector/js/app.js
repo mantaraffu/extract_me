@@ -34,7 +34,7 @@ const ui = {
   posTimer: $("posTimer"), zoom: $("zoom"),
   coach: $("coach"), coachFirst: $("coachFirst"), coachEvery: $("coachEvery"), coachThresh: $("coachThresh"), coachTest: $("coachTest"),
   speech: $("speech"), speechMax: $("speechMax"), speechSilence: $("speechSilence"),
-  speechModel: $("speechModel"), speechLib: $("speechLib"), speechInfo: $("speechInfo"),
+  speechModel: $("speechModel"), speechLib: $("speechLib"), speechInfo: $("speechInfo"), speechLead: $("speechLead"),
   saveLog: $("saveLog"), saveNow: $("saveNow"), saveInfo: $("saveInfo"),
   stats: $("stats"), bars: $("bars"),
 };
@@ -649,6 +649,7 @@ async function initSpeech() {
     commands: COMMANDS,
     freeMaxS: Math.max(2, parseFloat(ui.speechMax?.value) || 20),
     freeSilenceS: Math.max(0.3, parseFloat(ui.speechSilence?.value) || 1.5),
+    freeLeadS: Math.max(0.5, parseFloat(ui.speechLead?.value) || 4),
     coachPhrases: [...ENCOURAGEMENTS, ...REPRIMANDS, STEADY],
     nowS: performance.now() / 1000,
     onCommand: c => {

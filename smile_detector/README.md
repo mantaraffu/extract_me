@@ -121,7 +121,13 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   themselves off - so silence closes it, though not the first final result,
   since Vosk emits one at every pause and a mid-thought breath would truncate
   the answer: it stays open until nothing new has arrived for 1.5 s, with 20 s
-  as the ceiling. The coach is handled twice over: in command mode its lines are
+  as the ceiling. Silence before the visitor has started is not the same thing
+  as silence after they finished: they get 4 s to begin, and only once something
+  has been said does the 1.5 s rule take over - otherwise anyone who paused to
+  think lost their window. The tail of the opening command ("me", of "tell me")
+  is still in the audio the free recogniser receives, since the switch happens
+  on that command's own final result, so a first result that merely echoes the
+  command is dropped rather than becoming the transcript. The coach is handled twice over: in command mode its lines are
   not in the grammar, and in free mode a line matching a known coach phrase is
   dropped while a window it talked over is flagged `coachOverlap` rather than
   silently trusted - speech that merely *overlaps* the coach cannot be cleaned
