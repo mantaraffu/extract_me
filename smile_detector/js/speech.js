@@ -183,7 +183,7 @@ export class SpeechRouter {
  */
 export async function voskListener({
   modelUrl = "vendor/vosk-model-small-en-us-0.15.tar.gz",
-  vosk = null,                 // the vosk-browser module, imported by the caller
+  vosk = null,                 // the global the vosk-browser UMD bundle installs (window.Vosk)
   commands = COMMANDS,
   router = null,
   element = null,              // the shared <video>, used when a file is the source
@@ -216,7 +216,7 @@ export async function voskListener({
   for (const [rec, tag] of [[cmd, "cmd"], [free, "free"]]) {
     rec.on("result", feed(true));
     rec.on("partialresult", feed(false));
-    rec.on("error", e => say("error", `${tag}: ${e.message || e}`));
+    rec.on("error", e => say("error", `${tag}: ${e.error || e.message || e}`));
   }
 
   const ctx = new AudioContext({ sampleRate: 16000 });

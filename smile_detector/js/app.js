@@ -673,13 +673,29 @@ async function initSpeech() {
     else if (cmd === "reset") { state.positive.reset(t); state.faceTime.reset(t); }
   }
 
+  /**
+   * vosk-browser ships a UMD bundle, not an ES module: it installs a `Vosk`
+   * global and exports nothing, so `import()` would run it and hand back an
+   * empty namespace. A classic script tag is the documented way in.
+   */
+  function loadVosk(src) {
+    if (window.Vosk) return Promise.resolve(window.Vosk);
+    return new Promise((resolve, reject) => {
+      const el = document.createElement("script");
+      el.src = src;
+      el.onload = () => window.Vosk ? resolve(window.Vosk) : reject(new Error(`${src} loaded but defined no Vosk global`));
+      el.onerror = () => reject(new Error(`cannot load ${src}`));
+      document.head.appendChild(el);
+    });
+  }
+
   let listener = null;
   async function startListening() {
     if (listener || !ui.speech?.checked) return;
     try {
-      const vosk = await import(ui.speechLib?.value || "./vendor/vosk-browser.js");
+      const vosk = await loadVosk(ui.speechLib?.value || "vendor/vosk-browser.js");
       listener = await voskListener({
-        vosk: vosk.default || vosk,
+        vosk,
         modelUrl: ui.speechModel?.value || "vendor/vosk-model-small-en-us-0.15.tar.gz",
         commands: COMMANDS, router: state.speech, element: video,
         speaking: () => !!(window.speechSynthesis && window.speechSynthesis.speaking),
