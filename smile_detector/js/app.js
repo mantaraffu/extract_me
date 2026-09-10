@@ -59,6 +59,7 @@ const state = {
   coach: null,       // SmileCoach while the voice coach is on
   speech: null,      // SpeechRouter on the voice entry point, null on index.html
   speechListener: null,  // the Vosk listener, so the source switch can retarget its audio
+  speechFailure: null,   // why it would not start, kept for the session JSON
   speak: null,       // speak(text) on the Web Speech API, null where unavailable
   blockedText: null, // a line the browser refused to speak, retried on the next click
   log: null,         // SessionLog, created with the first frame so it knows the frame width
@@ -696,22 +697,38 @@ async function initSpeech() {
     });
   }
 
-  let listener = null;
+  let listener = null, starting = false, failure = null;
+  /**
+   * Every click retries this, so `starting` matters: without it a second click
+   * during the model load - 39 MB, seconds of it - would begin a second one,
+   * and the two would race.
+   */
   async function startListening() {
-    if (listener || !ui.speech?.checked) return;
+    if (listener || starting || !ui.speech?.checked) return;
+    starting = true;
+    setSpeechInfo("loading the model, this takes a few seconds...");
     try {
       const vosk = await loadVosk(ui.speechLib?.value || "vendor/vosk-browser.js");
-      listener = await voskListener({
+      const l = await voskListener({
         vosk,
         modelUrl: ui.speechModel?.value || "vendor/vosk-model-small-en-us-0.15.tar.gz",
         commands: COMMANDS, router: state.speech, element: video,
         speaking: () => !!(window.speechSynthesis && window.speechSynthesis.speaking),
         onState: (s, d) => setSpeechInfo(d ? `${s}: ${d}` : s),
       });
-      state.speechListener = listener;
-      await listener.setSource(state.source?.kind || "webcam");
+      await l.setSource(state.source?.kind || "webcam");
+      listener = l;
+      state.speechListener = l;
+      failure = null;
     } catch (e) {
-      setSpeechInfo(`speech off: ${e.message}. Put vosk-browser and the model under vendor/.`);
+      // the panel is easy to miss and the console is not always open: the
+      // session file has to carry this too, or the failure leaves no trace
+      failure = `${e.name || "Error"}: ${e.message || e}`;
+      state.speechFailure = `failed: ${failure}`;
+      console.error("[speech] cannot start:", e);
+      setSpeechInfo(`speech off - ${failure}`);
+    } finally {
+      starting = false;
     }
   }
   document.addEventListener("click", () => { startListening(); listener?.resume(); });
@@ -734,7 +751,10 @@ function sessionBody(reason) {
   // the recogniser's own account of the session, so a JSON with no transcript
   // still says which link of the chain broke
   if (state.log && state.speech) {
-    state.log.speechStats({ ...state.speech.stats, ...(state.speechListener?.stats || { listener: "never started" }) });
+    state.log.speechStats({
+      ...state.speech.stats,
+      ...(state.speechListener?.stats || { listener: state.speechFailure || "never started" }),
+    });
   }
   return JSON.stringify(state.log.toJSON({ nowS: performance.now() / 1000, reason }), null, 2);
 }
