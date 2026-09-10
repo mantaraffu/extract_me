@@ -226,3 +226,34 @@ test("a partial that is only the command echo does not start the clock", () => {
   assert.equal(r.tick(2.1), null);       // still closes on the lead-in
   assert.deepEqual(segments, []);
 });
+
+test("normalize strips the brackets off [unk], so UNK is never matched directly", () => {
+  assert.equal(normalize(UNK), "unk");
+  assert.notEqual(normalize(UNK), UNK);        // the comparison that silently never fired
+});
+
+test("an out-of-vocabulary result is dropped, not counted as speech", () => {
+  const { r, commands, segments } = routerWith({ freeLeadS: 2 });
+  assert.equal(say(r, "[unk]", 1), null);
+  assert.equal(say(r, "[unk] [unk]", 2), null);
+  assert.deepEqual(commands, []);
+  assert.deepEqual(segments, []);
+  assert.equal(r.stats.unknown, 2);
+});
+
+test("inline [unk] markers are stripped out of a transcript", () => {
+  const { r } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
+  say(r, OPEN_FREE, 0);
+  say(r, "i came [unk] here with [unk] my sister", 1);
+  const seg = r.tick(2.6);
+  assert.equal(seg.text, "i came here with my sister");
+});
+
+test("a free result of nothing but markers does not start the clock", () => {
+  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 2 });
+  say(r, OPEN_FREE, 0);
+  say(r, "[unk] [unk]", 0.5);
+  assert.equal(r.heard, false);
+  assert.equal(r.tick(2.1), null);
+  assert.deepEqual(segments, []);
+});

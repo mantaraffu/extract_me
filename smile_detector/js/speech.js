@@ -58,7 +58,9 @@ export const OPEN_FREE = "tell me";
  *  a false positive. */
 export const UNK = "[unk]";
 
-/** Lowercase, drop punctuation, collapse runs of whitespace. */
+/** Lowercase, drop punctuation, collapse runs of whitespace. Note that this
+ *  turns Vosk's `[unk]` into a bare `unk`: use `stripUnk` on the result, never
+ *  a comparison against UNK, which no normalized text can ever equal. */
 export function normalize(text) {
   return (text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -67,6 +69,19 @@ export function normalize(text) {
 export function grammar(commands = COMMANDS) {
   return [...commands.map(normalize), UNK];
 }
+
+/**
+ * Drop Vosk's out-of-vocabulary markers from normalized text. They arrive
+ * inline ("i came [unk] here"), so this is a filter over tokens rather than a
+ * test on the whole string, and a result that is nothing but markers comes back
+ * empty - which is the truth: no words were recognised.
+ */
+export function stripUnk(clean) {
+  return clean.split(" ").filter(w => w && w !== UNK_WORD).join(" ");
+}
+
+/** What `normalize` leaves of UNK. */
+export const UNK_WORD = normalize(UNK);
 
 export class SpeechRouter {
   constructor({
@@ -119,14 +134,15 @@ export class SpeechRouter {
    * Returns the command or the closed segment when one comes of it, else null.
    */
   result({ text, conf = null, final = false, nowS, speaking = false }) {
-    const clean = normalize(text);
+    const raw = normalize(text);
+    const clean = stripUnk(raw);
     if (speaking) this.overlap = true;
 
     if (final) this.stats.finals++; else this.stats.partials++;
-    if (clean === UNK) this.stats.unknown++;
+    if (raw !== clean) this.stats.unknown++;
 
     if (this.mode === "command") {
-      if (!final || !clean || clean === UNK) return null;
+      if (!final || !clean) return null;
       if (!this.commands.includes(clean)) {                // outside the grammar
         // what it heard instead is the one thing worth keeping: a grammar that
         // never matches looks exactly like a microphone that never worked.
@@ -141,7 +157,7 @@ export class SpeechRouter {
     }
 
     // free mode
-    if (!clean || clean === UNK) return null;
+    if (!clean) return null;
     if (!this.heard && this.echoesOpen(clean)) return null;   // tail of "tell me"
     this.heard = true;                                        // partials count: they are the sentence
     this.lastSpeechS = nowS;
