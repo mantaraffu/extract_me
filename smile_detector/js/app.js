@@ -41,6 +41,9 @@ const ui = {
 const ctx = ui.canvas.getContext("2d");
 
 const video = document.createElement("video");
+// Muted by default because the webcam path must be: its audio would come
+// straight back out of the speakers the coach is talking through. A loaded
+// file has no such problem and is unmuted in openFile.
 video.muted = true; video.playsInline = true; video.loop = true;
 
 const state = {
@@ -109,6 +112,7 @@ async function openWebcam(deviceId) {
                                  ...(deviceId ? { deviceId: { exact: deviceId } } : {}) }, audio: false };
   const stream = await navigator.mediaDevices.getUserMedia(constraints);
   video.srcObject = stream;
+  video.muted = true;
   await video.play();
   state.source = { kind: "webcam", el: video, width: video.videoWidth, height: video.videoHeight };
   ui.mirror.checked = true;
@@ -131,7 +135,16 @@ async function openFile(file) {
   }
   video.srcObject = null;
   video.src = URL.createObjectURL(file);
-  await video.play();
+  video.muted = false;
+  // Autoplay may refuse an unmuted element even after a file picker. Losing the
+  // picture over the sound would be the wrong trade: fall back to muted.
+  try {
+    await video.play();
+  } catch {
+    video.muted = true;
+    await video.play();
+    setStatus("the browser refused to play the sound: click the page and reload the file");
+  }
   state.source = { kind: "video", el: video, width: video.videoWidth, height: video.videoHeight };
   ui.mirror.checked = false;
   await state.vision.setMode("VIDEO");

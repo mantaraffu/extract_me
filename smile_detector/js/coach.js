@@ -7,7 +7,10 @@
  * with a reference: smiling more than the reference earns the next line of
  * the encouragements, smiling less earns the next line of the reprimands, and
  * a share unchanged within `tieMargin` earns the steady line ("keep going!"),
- * which moves no cursor. The very first verdict has nothing to compare with
+ * which moves no cursor - but only above `steadyMin`, because a share stuck at
+ * zero is not a tie worth praising, it is nobody smiling at all: it falls
+ * through to the reprimands, whose cursor then escalates round by round.
+ * Without that floor the coach said "keep going!" forever at 0%. The very first verdict has nothing to compare with
  * and goes by `threshold` instead. Each list keeps its own cursor, which only
  * moves forward (and wraps around at the end), so the tone escalates within a
  * list rather than repeating the same line.
@@ -54,7 +57,7 @@ export const STEADY = "keep going!";
 
 export class SmileCoach {
   constructor({
-    firstS = 120, everyS = 60, threshold = 0.3, tieMargin = 0.02,
+    firstS = 120, everyS = 60, threshold = 0.3, tieMargin = 0.02, steadyMin = 0,
     encouragements = ENCOURAGEMENTS, reprimands = REPRIMANDS, steady = STEADY,
     speak = null, nowS = 0,
   } = {}) {
@@ -62,6 +65,7 @@ export class SmileCoach {
     this.everyS = everyS;
     this.threshold = threshold;
     this.tieMargin = tieMargin;
+    this.steadyMin = steadyMin;   // a tie at or below this is a reprimand, not "keep going"
     this.steady = steady;
     this.encouragements = encouragements;
     this.reprimands = reprimands;
@@ -118,7 +122,7 @@ export class SmileCoach {
     // "keep going". The very first verdict has no history: the threshold decides.
     let kind;
     if (this.last === null || prev === null) kind = frac >= this.threshold ? "encouragement" : "reprimand";
-    else if (Math.abs(frac - prev) <= this.tieMargin) kind = "steady";
+    else if (Math.abs(frac - prev) <= this.tieMargin && frac > this.steadyMin) kind = "steady";
     else kind = frac > prev ? "encouragement" : "reprimand";
 
     let text;

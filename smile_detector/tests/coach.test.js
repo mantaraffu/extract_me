@@ -104,11 +104,11 @@ test("the first verdict goes by the threshold, later ties say keep going", () =>
   const spoken = [];
   const c = coachWith(spoken);
   run(c, 0, 120, 0.0);     // first: below 30% -> rep 0
-  run(c, 120, 60, 0.0);    // unchanged -> steady
+  run(c, 120, 60, 0.0);    // unchanged, but at zero: not a tie, a reprimand
   run(c, 180, 60, 1.0);    // better -> enc 0
-  run(c, 240, 60, 1.0);    // unchanged -> steady, no cursor moved
-  run(c, 300, 60, 0.5);    // worse -> rep 1
-  assert.deepEqual(spoken, [REPRIMANDS[0], STEADY, ENCOURAGEMENTS[0], STEADY, REPRIMANDS[1]]);
+  run(c, 240, 60, 1.0);    // unchanged and smiling -> steady, no cursor moved
+  run(c, 300, 60, 0.5);    // worse -> rep 2
+  assert.deepEqual(spoken, [REPRIMANDS[0], REPRIMANDS[1], ENCOURAGEMENTS[0], STEADY, REPRIMANDS[2]]);
   assert.equal(c.last.kind, "reprimand");
 });
 
@@ -283,4 +283,28 @@ test("browserSpeaker: reports blocked, error and speaking; ignores its own inter
       ["speaking", "one", undefined], ["done", "one", undefined],
     ]);
   } finally { dropFakeSpeech(); }
+});
+
+test("a share stuck at zero never says keep going, and does not repeat itself", () => {
+  const spoken = [];
+  const c = coachWith(spoken);
+  for (let i = 0; i < 5; i++) run(c, i * 60, 60, 0.0);   // a face, never smiling
+  assert.ok(!spoken.includes(STEADY), `said "${STEADY}" at 0%: ${spoken.join(" | ")}`);
+  assert.deepEqual(spoken, REPRIMANDS.slice(0, spoken.length));   // escalates, no repeats
+});
+
+test("a tie is still a tie as soon as there is some smiling", () => {
+  const spoken = [];
+  const c = coachWith(spoken);
+  run(c, 0, 120, 0.4);
+  run(c, 120, 60, 0.4);
+  assert.equal(c.last.kind, "steady");
+  assert.equal(spoken.at(-1), STEADY);
+});
+
+test("steadyMin raises the floor under the steady line", () => {
+  const c = new SmileCoach({ steadyMin: 0.2, nowS: 0 });
+  run(c, 0, 120, 0.1);
+  run(c, 120, 60, 0.1);      // unchanged at 10%, below the floor
+  assert.equal(c.last.kind, "reprimand");
 });

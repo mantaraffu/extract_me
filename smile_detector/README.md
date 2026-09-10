@@ -82,7 +82,9 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   share, the "session N% happy" at the top: smiling more than your session
   average moves one step along the encouragements list, smiling less moves
   one step along the reprimands list, and a share unchanged within 2 points
-  earns "keep going!" and moves nothing. Each list keeps its own cursor and
+  earns "keep going!" and moves nothing - but only while something is actually
+  being kept going: a share unchanged at zero is nobody smiling, not a tie, and
+  it goes to the reprimands instead, which then escalate. Each list keeps its own cursor and
   wraps around at the end, so the tone escalates instead of repeating. The
   very first verdict has nothing to compare with and goes by the 30%
   threshold. Both shares are over the time a face was visible, not
