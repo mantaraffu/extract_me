@@ -58,6 +58,7 @@ const state = {
   zoomRoi: null,     // region fed to the face detector next frame, null = full frame
   coach: null,       // SmileCoach while the voice coach is on
   speech: null,      // SpeechRouter on the voice entry point, null on index.html
+  speechListener: null,  // the Vosk listener, so the source switch can retarget its audio
   speak: null,       // speak(text) on the Web Speech API, null where unavailable
   blockedText: null, // a line the browser refused to speak, retried on the next click
   log: null,         // SessionLog, created with the first frame so it knows the frame width
@@ -115,6 +116,7 @@ async function openWebcam(deviceId) {
   video.muted = true;
   await video.play();
   state.source = { kind: "webcam", el: video, width: video.videoWidth, height: video.videoHeight };
+  state.speechListener?.setSource("webcam").catch(() => {});
   ui.mirror.checked = true;
   await state.vision.setMode("VIDEO");
   await listCams();
@@ -128,6 +130,7 @@ async function openFile(file) {
     img.src = URL.createObjectURL(file);
     await img.decode();
     state.source = { kind: "image", el: img, width: img.naturalWidth, height: img.naturalHeight };
+    state.speechListener?.setSource("image").catch(() => {});   // no audio in a still: back to the room
     ui.mirror.checked = false;
     await state.vision.setMode("IMAGE");
     setStatus(`image ${img.naturalWidth}x${img.naturalHeight}`);
@@ -146,6 +149,7 @@ async function openFile(file) {
     setStatus("the browser refused to play the sound: click the page and reload the file");
   }
   state.source = { kind: "video", el: video, width: video.videoWidth, height: video.videoHeight };
+  state.speechListener?.setSource("video").catch(() => {});
   ui.mirror.checked = false;
   await state.vision.setMode("VIDEO");
   setStatus(`video ${video.videoWidth}x${video.videoHeight}`);
@@ -677,10 +681,12 @@ async function initSpeech() {
       listener = await voskListener({
         vosk: vosk.default || vosk,
         modelUrl: ui.speechModel?.value || "vendor/vosk-model-small-en-us-0.15.tar.gz",
-        commands: COMMANDS, router: state.speech,
+        commands: COMMANDS, router: state.speech, element: video,
         speaking: () => !!(window.speechSynthesis && window.speechSynthesis.speaking),
         onState: (s, d) => setSpeechInfo(d ? `${s}: ${d}` : s),
       });
+      state.speechListener = listener;
+      await listener.setSource(state.source?.kind || "webcam");
     } catch (e) {
       setSpeechInfo(`speech off: ${e.message}. Put vosk-browser and the model under vendor/.`);
     }
@@ -688,7 +694,7 @@ async function initSpeech() {
   document.addEventListener("click", () => { startListening(); listener?.resume(); });
   ui.speech?.addEventListener("change", () => {
     if (ui.speech.checked) startListening();
-    else { listener?.stop(); listener = null; }
+    else { listener?.stop(); listener = null; state.speechListener = null; }
   });
   setSpeechInfo("click anywhere to start listening");
 }

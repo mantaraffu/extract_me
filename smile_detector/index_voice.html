@@ -78,6 +78,9 @@
     <label>and lasts at most <input id="speechMax" type="number" step="1" min="2" value="20"> s</label>
     <label>model <input id="speechModel" type="text" value="vendor/vosk-model-small-en-us-0.15.tar.gz"></label>
     <label>library <input id="speechLib" type="text" value="./vendor/vosk-browser.js"></label>
+    <p class="hint">the audio follows the source: the microphone with the webcam, the file itself
+    when a video is loaded. Recognition runs at 16 kHz, so a loaded video plays back dull - it is a
+    test source, not something to listen to.</p>
     <p class="hint" id="speechInfo"></p>
   </fieldset>
 

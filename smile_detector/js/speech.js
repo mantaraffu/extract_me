@@ -154,17 +154,29 @@ export class SpeechRouter {
 }
 
 /**
- * Microphone -> Vosk -> SpeechRouter. The browser half: not covered by the
- * Node tests, which is why everything worth testing lives in SpeechRouter.
+ * Audio -> Vosk -> SpeechRouter. The browser half: not covered by the Node
+ * tests, which is why everything worth testing lives in SpeechRouter.
  *
  * Two recognizers share one loaded model: `cmd` runs the grammar, `free` the
  * full vocabulary, and audio goes to whichever the router is currently in.
  * Building both up front costs a little memory and removes the pause that
  * rebuilding a decoding graph would put at the start of every free window.
  *
- * The AudioContext is opened at 16 kHz, the rate Vosk wants, so the browser
- * resamples the 48 kHz microphone for us. `echoCancellation` is on because the
- * coach speaks into the same room the microphone listens to.
+ * Audio follows the picture. With the webcam the microphone is the only sound
+ * there is, and `echoCancellation` matters because the coach speaks into the
+ * room the microphone listens to. With a file, the room is irrelevant and the
+ * recognizer should hear the video, so the element feeds the graph instead.
+ *
+ * The context runs at 16 kHz, the rate Vosk wants, so the browser resamples
+ * for us - and a file played through it sounds like a telephone. That is the
+ * deliberate trade: a loaded video is a test source, not something an audience
+ * listens to.
+ *
+ * Two traps, both about `createMediaElementSource`. It may be called only once
+ * per element, so the node is cached. And it *takes over* the element's output:
+ * from then on the sound only reaches the speakers through this graph, which is
+ * why the node is wired to `destination` and why `stop()` leaves the context
+ * open - closing or suspending it would silence the video for good.
  *
  * `modelUrl` points at a Vosk model archive served locally (nothing here talks
  * to the network): vosk-model-small-en-us is the ~40 MB one.
@@ -174,6 +186,7 @@ export async function voskListener({
   vosk = null,                 // the vosk-browser module, imported by the caller
   commands = COMMANDS,
   router = null,
+  element = null,              // the shared <video>, used when a file is the source
   deviceId = null,
   onState = null,              // (state, detail) for the status line
   nowS = () => performance.now() / 1000,
@@ -206,33 +219,62 @@ export async function voskListener({
     rec.on("error", e => say("error", `${tag}: ${e.message || e}`));
   }
 
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true, noiseSuppression: true, autoGainControl: true,
-      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-    },
-  });
   const ctx = new AudioContext({ sampleRate: 16000 });
-  const source = ctx.createMediaStreamSource(stream);
   // ScriptProcessor is deprecated but is what vosk-browser's own integration
-  // uses, and it is the one path that works the same in every browser here.
-  const node = ctx.createScriptProcessor(4096, 1, 1);
-  node.onaudioprocess = e => {
+  // uses, and it is the one path that behaves the same in every browser here.
+  // Its output buffer is never written, so it feeds the speakers silence.
+  const proc = ctx.createScriptProcessor(4096, 1, 1);
+  proc.onaudioprocess = e => {
     try { (router.mode === "free" ? free : cmd).acceptWaveform(e.inputBuffer); }
     catch (err) { say("error", err.message || String(err)); }
   };
-  source.connect(node);
-  node.connect(ctx.destination);
-  say("listening", null);
+  proc.connect(ctx.destination);
+
+  let micStream = null, micSrc = null, elSrc = null, active = null, kind = null;
+  function route(node) {
+    if (active === node) return;
+    if (active) { try { active.disconnect(proc); } catch {} }
+    active = node;
+    if (active) active.connect(proc);
+  }
+
+  /** Point the recognizer at the room ("webcam", "image") or at the file ("video"). */
+  async function setSource(sourceKind) {
+    if (sourceKind === kind) return;
+    kind = sourceKind;
+    if (sourceKind === "video" && element) {
+      if (!elSrc) {
+        elSrc = ctx.createMediaElementSource(element);
+        elSrc.connect(ctx.destination);   // the element has no other way out now
+      }
+      route(elSrc);
+      say("listening", "video file");
+      return;
+    }
+    if (!micSrc) {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        },
+      });
+      micSrc = ctx.createMediaStreamSource(micStream);
+    }
+    route(micSrc);
+    say("listening", "microphone");
+  }
 
   return {
+    setSource,
     get mode() { return router.mode; },
+    get source() { return kind; },
     async resume() { if (ctx.state === "suspended") await ctx.resume(); },
+    /** Stops recognising. The context stays open on purpose: a file whose audio
+     *  runs through it would go silent for good otherwise. */
     stop() {
-      node.onaudioprocess = null;
-      try { source.disconnect(); node.disconnect(); } catch {}
-      for (const t of stream.getTracks()) t.stop();
-      ctx.close();
+      proc.onaudioprocess = null;
+      route(null);
+      if (micStream) { for (const t of micStream.getTracks()) t.stop(); micStream = null; micSrc = null; }
       say("stopped", null);
     },
   };
