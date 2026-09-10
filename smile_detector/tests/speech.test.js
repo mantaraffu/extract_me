@@ -205,3 +205,24 @@ test("freeLeftS counts the lead-in before anything is said", () => {
   say(r, "hello", 1);
   assert.equal(r.freeLeftS(1.5), 1);     // now the silence rule
 });
+
+test("partials keep a long sentence alive: Vosk only finalises at a pause", () => {
+  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
+  say(r, OPEN_FREE, 0);
+  // one long utterance: nothing but partials until the speaker stops
+  for (let t = 1; t <= 8; t++) r.result({ text: "i came here with my", final: false, nowS: t });
+  assert.equal(r.tick(8.1), null, "closed in the middle of the sentence");
+  say(r, "i came here with my sister", 8.5);
+  const seg = r.tick(10.1);
+  assert.equal(seg.text, "i came here with my sister");
+  assert.equal(segments.length, 1);
+});
+
+test("a partial that is only the command echo does not start the clock", () => {
+  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 2 });
+  say(r, OPEN_FREE, 0);
+  r.result({ text: "me", final: false, nowS: 0.1 });
+  assert.equal(r.heard, false);
+  assert.equal(r.tick(2.1), null);       // still closes on the lead-in
+  assert.deepEqual(segments, []);
+});

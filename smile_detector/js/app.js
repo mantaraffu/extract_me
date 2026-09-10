@@ -640,6 +640,7 @@ ui.coachTest.addEventListener("click", () => {
  * needs the microphone, and it is started on the first click because an
  * AudioContext may not be resumed before a gesture.
  */
+const SPEECH_KEY = "smile_detector.speech";
 async function initSpeech() {
   const { SpeechRouter, COMMANDS, voskListener } = await import("./speech.js");
   const { ENCOURAGEMENTS, REPRIMANDS, STEADY } = await import("./coach.js");
@@ -656,6 +657,11 @@ async function initSpeech() {
       state.log?.command(c, performance.now() / 1000);
       console.log(`[speech] command: "${c.command}"`);
       runCommand(c.command);
+      state.dirty = true;
+    },
+    onOpen: () => {
+      console.log("[speech] free window open, listening");
+      setSpeechInfo("listening: say something");
       state.dirty = true;
     },
     onFree: seg => {
@@ -709,7 +715,9 @@ async function initSpeech() {
     }
   }
   document.addEventListener("click", () => { startListening(); listener?.resume(); });
+  try { if (localStorage.getItem(SPEECH_KEY) === "1" && ui.speech) ui.speech.checked = true; } catch {}
   ui.speech?.addEventListener("change", () => {
+    try { localStorage.setItem(SPEECH_KEY, ui.speech.checked ? "1" : "0"); } catch {}
     if (ui.speech.checked) startListening();
     else { listener?.stop(); listener = null; state.speechListener = null; }
   });

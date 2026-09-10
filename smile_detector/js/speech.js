@@ -25,6 +25,11 @@
  * recognizer then receives, and it opened every window with a stray word. A
  * first result that is just an echo of the opening command is dropped.
  *
+ * Both clocks run off `heard`, which any non-empty result sets - partial ones
+ * included. Vosk only emits a final result at a pause, so a long sentence is
+ * nothing but partials while it is being spoken: keying the clocks off final
+ * results alone closed the window in the middle of it.
+ *
  * The coach speaks through the same room the microphone listens to. In command
  * mode the grammar already protects us: the coach's lines are not in the word
  * list, so they decode to `[unk]`. In free mode they would be transcribed, so
@@ -68,7 +73,7 @@ export class SpeechRouter {
     commands = COMMANDS, openFree = OPEN_FREE,
     freeMaxS = 20, freeSilenceS = 1.5, freeLeadS = 4,
     coachPhrases = [],
-    onCommand = null, onFree = null, nowS = 0,
+    onCommand = null, onFree = null, onOpen = null, nowS = 0,
   } = {}) {
     this.commands = commands.map(normalize);
     this.openFree = normalize(openFree);
@@ -78,6 +83,7 @@ export class SpeechRouter {
     this.coachPhrases = new Set(coachPhrases.map(normalize));
     this.onCommand = onCommand;
     this.onFree = onFree;
+    this.onOpen = onOpen;
     this.reset(nowS);
   }
 
@@ -86,6 +92,7 @@ export class SpeechRouter {
     this.mode = "command";
     this.parts = [];       // final results collected in the current free window
     this.confs = [];
+    this.heard = false;    // anything at all said in this window, partials included
     this.openedS = nowS;
     this.lastSpeechS = nowS;
     this.overlap = false;  // the coach spoke at some point during this window
@@ -96,7 +103,7 @@ export class SpeechRouter {
   freeLeftS(nowS) {
     if (this.mode !== "free") return null;
     const ceiling = this.freeMaxS - (nowS - this.openedS);
-    const near = this.parts.length
+    const near = this.heard
       ? this.freeSilenceS - (nowS - this.lastSpeechS)
       : this.freeLeadS - (nowS - this.openedS);
     return Math.max(0, Math.min(ceiling, near));
@@ -122,9 +129,11 @@ export class SpeechRouter {
     }
 
     // free mode
-    if (!final || !clean || clean === UNK) return null;
-    if (!this.parts.length && this.echoesOpen(clean)) return null;   // tail of "tell me"
+    if (!clean || clean === UNK) return null;
+    if (!this.heard && this.echoesOpen(clean)) return null;   // tail of "tell me"
+    this.heard = true;                                        // partials count: they are the sentence
     this.lastSpeechS = nowS;
+    if (!final) return null;
     if (this.coachPhrases.has(clean)) return null;         // the coach, verbatim
     this.parts.push(clean);
     if (conf !== null) this.confs.push(conf);
@@ -134,7 +143,7 @@ export class SpeechRouter {
   /** Drives the timeouts; call it once per frame with the current instant. */
   tick(nowS) {
     if (this.mode !== "free") return null;
-    const started = this.parts.length > 0;
+    const started = this.heard;
     const quiet = started
       ? nowS - this.lastSpeechS >= this.freeSilenceS
       : nowS - this.openedS >= this.freeLeadS;      // nobody ever started
@@ -153,9 +162,11 @@ export class SpeechRouter {
     this.mode = "free";
     this.parts = [];
     this.confs = [];
+    this.heard = false;
     this.openedS = nowS;
     this.lastSpeechS = nowS;
     this.overlap = false;
+    if (this.onOpen) this.onOpen({ atS: nowS });
   }
 
   /** Close the free window and hand over whatever it collected. */
@@ -170,6 +181,7 @@ export class SpeechRouter {
     this.mode = "command";
     this.parts = [];
     this.confs = [];
+    this.heard = false;
     this.overlap = false;
     if (!text) return null;               // an empty window is not a segment
     this.last = seg;
