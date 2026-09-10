@@ -33,6 +33,8 @@ const ui = {
   emotion: $("emotion"), vitEvery: $("vitEvery"),
   posTimer: $("posTimer"), zoom: $("zoom"),
   coach: $("coach"), coachFirst: $("coachFirst"), coachEvery: $("coachEvery"), coachThresh: $("coachThresh"), coachTest: $("coachTest"),
+  speech: $("speech"), speechMax: $("speechMax"), speechSilence: $("speechSilence"),
+  speechModel: $("speechModel"), speechLib: $("speechLib"), speechInfo: $("speechInfo"),
   saveLog: $("saveLog"), saveNow: $("saveNow"), saveInfo: $("saveInfo"),
   stats: $("stats"), bars: $("bars"),
 };
@@ -52,6 +54,7 @@ const state = {
   zoom: new ZoomTracker(),
   zoomRoi: null,     // region fed to the face detector next frame, null = full frame
   coach: null,       // SmileCoach while the voice coach is on
+  speech: null,      // SpeechRouter on the voice entry point, null on index.html
   speak: null,       // speak(text) on the Web Speech API, null where unavailable
   blockedText: null, // a line the browser refused to speak, retried on the next click
   log: null,         // SessionLog, created with the first frame so it knows the frame width
@@ -258,6 +261,9 @@ function processFrame(src) {
     if (verdict) console.log(`[coach] ${verdict.kind}: "${verdict.text}" happy=${(verdict.frac * 100).toFixed(0)}%`
       + (verdict.prevFrac === null ? "" : ` (was ${(verdict.prevFrac * 100).toFixed(0)}%)`));
   }
+
+  // --- speech: the free window closes on silence or on its ceiling ---
+  state.speech?.tick(nowS);
 
   // --- session log: everything above, accumulated for the JSON on the Desktop ---
   if (!state.log) {
@@ -610,6 +616,72 @@ ui.coachTest.addEventListener("click", () => {
 });
 
 /**
+ * Speech, only on the voice entry point: `index.html` never imports the module,
+ * so the plain version is byte for byte the one that was there before.
+ *
+ * The router is pure and always running once built; the Vosk listener is what
+ * needs the microphone, and it is started on the first click because an
+ * AudioContext may not be resumed before a gesture.
+ */
+async function initSpeech() {
+  const { SpeechRouter, COMMANDS, voskListener } = await import("./speech.js");
+  const { ENCOURAGEMENTS, REPRIMANDS, STEADY } = await import("./coach.js");
+  const setSpeechInfo = t => { if (ui.speechInfo) ui.speechInfo.textContent = t; };
+
+  state.speech = new SpeechRouter({
+    commands: COMMANDS,
+    freeMaxS: Math.max(2, parseFloat(ui.speechMax?.value) || 20),
+    freeSilenceS: Math.max(0.3, parseFloat(ui.speechSilence?.value) || 1.5),
+    coachPhrases: [...ENCOURAGEMENTS, ...REPRIMANDS, STEADY],
+    nowS: performance.now() / 1000,
+    onCommand: c => {
+      state.log?.command(c, performance.now() / 1000);
+      console.log(`[speech] command: "${c.command}"`);
+      runCommand(c.command);
+      state.dirty = true;
+    },
+    onFree: seg => {
+      state.log?.freeSegment(seg, performance.now() / 1000);
+      console.log(`[speech] free (${seg.endedBy}, conf ${seg.conf ?? "?"}): "${seg.text}"`);
+      setSpeechInfo(`heard: "${seg.text}"`);
+      state.dirty = true;
+    },
+  });
+
+  // Commands that map onto something the app already does. The rest of the
+  // list is recorded in the JSON and does nothing yet, on purpose.
+  function runCommand(cmd) {
+    const t = performance.now() / 1000;
+    if (cmd === "save session") saveSession("manual");
+    else if (cmd === "reset") { state.positive.reset(t); state.faceTime.reset(t); }
+  }
+
+  let listener = null;
+  async function startListening() {
+    if (listener || !ui.speech?.checked) return;
+    try {
+      const vosk = await import(ui.speechLib?.value || "./vendor/vosk-browser.js");
+      listener = await voskListener({
+        vosk: vosk.default || vosk,
+        modelUrl: ui.speechModel?.value || "vendor/vosk-model-small-en-us-0.15.tar.gz",
+        commands: COMMANDS, router: state.speech,
+        speaking: () => !!(window.speechSynthesis && window.speechSynthesis.speaking),
+        onState: (s, d) => setSpeechInfo(d ? `${s}: ${d}` : s),
+      });
+    } catch (e) {
+      setSpeechInfo(`speech off: ${e.message}. Put vosk-browser and the model under vendor/.`);
+    }
+  }
+  document.addEventListener("click", () => { startListening(); listener?.resume(); });
+  ui.speech?.addEventListener("change", () => {
+    if (ui.speech.checked) startListening();
+    else { listener?.stop(); listener = null; }
+  });
+  setSpeechInfo("click anywhere to start listening");
+}
+if (window.SMILE_SPEECH) initSpeech();
+
+/**
  * Session JSON to the Desktop through the local server. `sendBeacon` is the
  * one request a page may still make while it is being closed; the manual save
  * uses fetch so the reply (the path written) can be shown.
@@ -621,7 +693,13 @@ function saveSession(reason) {
   if (!state.log || !ui.saveLog.checked) return;
   const url = `save?name=${encodeURIComponent(state.logFile)}`;
   const body = new Blob([sessionBody(reason)], { type: "application/json" });
-  if (reason === "close") { navigator.sendBeacon(url, body); return; }
+  // sendBeacon caps the payload (~64 KB) and returns false rather than throwing.
+  // Only the free transcript can grow that far, but a silent loss of the final
+  // save is not a thing to find out about later: fall back to a keepalive fetch.
+  if (reason === "close") {
+    if (!navigator.sendBeacon(url, body)) fetch(url, { method: "POST", body, keepalive: true }).catch(() => {});
+    return;
+  }
   fetch(url, { method: "POST", body })
     .then(async r => {
       if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);

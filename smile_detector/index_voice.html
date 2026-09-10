@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>emotionscript — voice</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="view"></canvas>
+
+<aside id="panel">
+  <h1>emotionscript <small>voice</small></h1>
+  <div id="status">starting...</div>
+
+  <label>source
+    <select id="source"></select>
+  </label>
+  <input id="file" type="file" accept="video/*,image/*" hidden>
+
+  <div class="row">
+    <label><input id="mirror" type="checkbox" checked> mirror</label>
+    <label><input id="overlay" type="checkbox" checked> overlay</label>
+  </div>
+
+  <fieldset>
+    <legend><label><input id="blink" type="checkbox" checked> blink</label></legend>
+    <label>mode
+      <select id="blinkMode">
+        <option value="blend">blendshape (eyeBlink)</option>
+        <option value="ear">EAR (landmarks)</option>
+      </select>
+    </label>
+    <label>threshold <input id="blinkThresh" type="number" step="0.01" min="0" max="1" placeholder="0.5"></label>
+  </fieldset>
+
+  <fieldset>
+    <legend><label><input id="hands" type="checkbox"> hands → video window between the palms</label></legend>
+    <label><input id="handsHold" type="checkbox"> lock the rect on appearance</label>
+    <label><input id="handsResetOn" type="checkbox"> reset every <input id="handsReset" type="number" step="1" min="1" value="15"> s</label>
+  </fieldset>
+
+  <fieldset>
+    <legend><label><input id="zoom" type="checkbox" checked> adaptive zoom (distant faces)</label></legend>
+    <p class="hint">crops the frame for the detector when the face is lost: past
+    ~2 m the face is too small a fraction of the frame to be found.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>emotion</legend>
+    <label>source
+      <select id="emotion">
+        <option value="blend">blendshape (heuristic, free)</option>
+        <option value="vit">ViT (transformers.js, 90–350MB once)</option>
+        <option value="off">off</option>
+      </select>
+    </label>
+    <label>ViT every <input id="vitEvery" type="number" step="1" min="1" value="3"> frames</label>
+    <label><input id="posTimer" type="checkbox" checked> elapsed time, stopwatch of positive time and % happy</label>
+  </fieldset>
+
+  <fieldset>
+    <legend><label><input id="coach" type="checkbox"> smile coach (voice)</label></legend>
+    <p class="hint">first verdict after <input id="coachFirst" type="number" step="1" min="5" value="120"> s:
+    happy for at least <input id="coachThresh" type="number" step="1" min="0" max="100" value="30">% of the
+    time with a face is praise, less is a scolding. Then every <input id="coachEvery" type="number" step="1" min="5" value="60"> s:
+    smiling more than in the previous window moves one step along the encouragements, less moves one step along the reprimands.</p>
+    <button id="coachTest" type="button">test voice</button>
+  </fieldset>
+
+  <fieldset>
+    <legend><label><input id="speech" type="checkbox"> speech (Vosk, offline)</label></legend>
+    <p class="hint">a closed list of commands (<code>save session</code>, <code>reset</code>,
+    <code>tell me</code>) recognised through a Vosk grammar: anything outside the list decodes to
+    <code>[unk]</code> and is ignored. <code>tell me</code> opens a free window where everything said
+    is transcribed, and which closes by itself.</p>
+    <label>free window closes after <input id="speechSilence" type="number" step="0.1" min="0.3" value="1.5"> s of silence</label>
+    <label>and lasts at most <input id="speechMax" type="number" step="1" min="2" value="20"> s</label>
+    <label>model <input id="speechModel" type="text" value="vendor/vosk-model-small-en-us-0.15.tar.gz"></label>
+    <label>library <input id="speechLib" type="text" value="./vendor/vosk-browser.js"></label>
+    <p class="hint" id="speechInfo"></p>
+  </fieldset>
+
+  <fieldset>
+    <legend><label><input id="saveLog" type="checkbox" checked> save session JSON to the Desktop</label></legend>
+    <p class="hint">blinks, time smiling and not, emotions, hands, coach verdicts, recognised commands
+    and free transcripts, and a per-minute timeline. Written when the page closes, every 30 s, and on demand. Needs the bundled server
+    (<code>npm run serve</code>).</p>
+    <button id="saveNow" type="button">save now</button>
+    <p class="hint" id="saveInfo"></p>
+  </fieldset>
+
+  <pre id="stats"></pre>
+  <div id="bars"></div>
+
+  <p class="hint">keys: <b>h</b> panel · <b>o</b> overlay · <b>m</b> mirror · <b>f</b> fullscreen · <b>r</b> reset rect · <b>t</b> reset stopwatch and % happy · <b>c</b> coach verdict now · <b>s</b> save session<br>
+  drag a video or an image onto the page to use it as the source.<br>
+  per-frame state in <code>window.emotionState</code> and the <code>emotionscript</code> event.</p>
+</aside>
+
+<script>window.SMILE_SPEECH = true;</script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

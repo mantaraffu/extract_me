@@ -1,0 +1,239 @@
+/**
+ * Speech: a constrained-grammar command layer with occasional free windows.
+ *
+ * Two recognizers share one model. The command layer runs a closed word list
+ * (a Vosk grammar), which keeps it small, fast and accurate; anything outside
+ * that list comes back as `[unk]` and is dropped. One command opens a free
+ * window, where a full-vocabulary recognizer takes over until the visitor
+ * stops talking or the window times out.
+ *
+ * Closing the free window on a spoken command would not work: in free mode the
+ * recognizer has the whole vocabulary, so "stop" is just a word, and a visitor
+ * saying it mid-sentence would cut themselves off. Silence closes the window
+ * instead - but not the first final result, because Vosk emits one at every
+ * pause and a mid-thought breath would truncate the answer. The window stays
+ * open until nothing new has arrived for `freeSilenceS`, with `freeMaxS` as
+ * the hard ceiling for whoever never stops.
+ *
+ * The coach speaks through the same room the microphone listens to. In command
+ * mode the grammar already protects us: the coach's lines are not in the word
+ * list, so they decode to `[unk]`. In free mode they would be transcribed, so
+ * a line matching a known coach phrase is dropped outright, and a segment that
+ * overlapped the coach is flagged `coachOverlap` rather than silently trusted -
+ * the caller can decide what a contaminated transcript is worth. Speech that
+ * merely *overlaps* the coach cannot be cleaned up textually at all, which is
+ * why `echoCancellation` belongs in the audio constraints.
+ *
+ * Pure logic: audio and recognizer live in `voskListener`, time comes in
+ * through `result`/`tick`, results go out through the injected callbacks.
+ */
+
+/** Command words. A closed list: edit here, it becomes the Vosk grammar. */
+export const COMMANDS = [
+  "save session",
+  "reset",
+  "tell me",
+];
+
+/** The command that opens a free window. Must be one of COMMANDS. */
+export const OPEN_FREE = "tell me";
+
+/** Vosk's out-of-vocabulary token. In the grammar it keeps unknown audio from
+ *  being forced onto the nearest command; without it every stray noise becomes
+ *  a false positive. */
+export const UNK = "[unk]";
+
+/** Lowercase, drop punctuation, collapse runs of whitespace. */
+export function normalize(text) {
+  return (text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** The word list handed to Vosk: the commands plus the unknown token. */
+export function grammar(commands = COMMANDS) {
+  return [...commands.map(normalize), UNK];
+}
+
+export class SpeechRouter {
+  constructor({
+    commands = COMMANDS, openFree = OPEN_FREE,
+    freeMaxS = 20, freeSilenceS = 1.5,
+    coachPhrases = [],
+    onCommand = null, onFree = null, nowS = 0,
+  } = {}) {
+    this.commands = commands.map(normalize);
+    this.openFree = normalize(openFree);
+    this.freeMaxS = freeMaxS;
+    this.freeSilenceS = freeSilenceS;
+    this.coachPhrases = new Set(coachPhrases.map(normalize));
+    this.onCommand = onCommand;
+    this.onFree = onFree;
+    this.reset(nowS);
+  }
+
+  /** Back to command mode, dropping anything the open window had collected. */
+  reset(nowS = 0) {
+    this.mode = "command";
+    this.parts = [];       // final results collected in the current free window
+    this.confs = [];
+    this.openedS = nowS;
+    this.lastSpeechS = nowS;
+    this.overlap = false;  // the coach spoke at some point during this window
+    this.last = null;      // the latest command or segment, for the caption
+  }
+
+  /** Seconds left before the free window closes on its own, null in command mode. */
+  freeLeftS(nowS) {
+    if (this.mode !== "free") return null;
+    return Math.max(0, Math.min(this.freeMaxS - (nowS - this.openedS),
+                                this.freeSilenceS - (nowS - this.lastSpeechS)));
+  }
+
+  /**
+   * One recognizer result. `final` marks the end of an utterance (Vosk emits
+   * one at every pause); partial results only keep the window alive.
+   * `speaking` is whether the coach was talking as this arrived.
+   * Returns the command or the closed segment when one comes of it, else null.
+   */
+  result({ text, conf = null, final = false, nowS, speaking = false }) {
+    const clean = normalize(text);
+    if (speaking) this.overlap = true;
+
+    if (this.mode === "command") {
+      if (!final || !clean || clean === UNK) return null;
+      if (!this.commands.includes(clean)) return null;     // outside the grammar
+      if (clean === this.openFree) { this.openWindow(nowS); return null; }
+      this.last = { kind: "command", command: clean, atS: nowS };
+      if (this.onCommand) this.onCommand(this.last);
+      return this.last;
+    }
+
+    // free mode
+    this.lastSpeechS = nowS;
+    if (!final || !clean || clean === UNK) return null;
+    if (this.coachPhrases.has(clean)) return null;         // the coach, verbatim
+    this.parts.push(clean);
+    if (conf !== null) this.confs.push(conf);
+    return null;
+  }
+
+  /** Drives the timeouts; call it once per frame with the current instant. */
+  tick(nowS) {
+    if (this.mode !== "free") return null;
+    const quiet = nowS - this.lastSpeechS >= this.freeSilenceS;
+    const expired = nowS - this.openedS >= this.freeMaxS;
+    return quiet || expired ? this.closeWindow(nowS, expired && !quiet ? "timeout" : "silence") : null;
+  }
+
+  openWindow(nowS) {
+    this.mode = "free";
+    this.parts = [];
+    this.confs = [];
+    this.openedS = nowS;
+    this.lastSpeechS = nowS;
+    this.overlap = false;
+  }
+
+  /** Close the free window and hand over whatever it collected. */
+  closeWindow(nowS, endedBy = "silence") {
+    const text = this.parts.join(" ").trim();
+    const conf = this.confs.length ? this.confs.reduce((a, b) => a + b, 0) / this.confs.length : null;
+    const seg = {
+      kind: "free", text, conf: conf === null ? null : +conf.toFixed(3),
+      atS: this.openedS, durationS: +(nowS - this.openedS).toFixed(2),
+      coachOverlap: this.overlap, endedBy,
+    };
+    this.mode = "command";
+    this.parts = [];
+    this.confs = [];
+    this.overlap = false;
+    if (!text) return null;               // an empty window is not a segment
+    this.last = seg;
+    if (this.onFree) this.onFree(seg);
+    return seg;
+  }
+}
+
+/**
+ * Microphone -> Vosk -> SpeechRouter. The browser half: not covered by the
+ * Node tests, which is why everything worth testing lives in SpeechRouter.
+ *
+ * Two recognizers share one loaded model: `cmd` runs the grammar, `free` the
+ * full vocabulary, and audio goes to whichever the router is currently in.
+ * Building both up front costs a little memory and removes the pause that
+ * rebuilding a decoding graph would put at the start of every free window.
+ *
+ * The AudioContext is opened at 16 kHz, the rate Vosk wants, so the browser
+ * resamples the 48 kHz microphone for us. `echoCancellation` is on because the
+ * coach speaks into the same room the microphone listens to.
+ *
+ * `modelUrl` points at a Vosk model archive served locally (nothing here talks
+ * to the network): vosk-model-small-en-us is the ~40 MB one.
+ */
+export async function voskListener({
+  modelUrl = "vendor/vosk-model-small-en-us-0.15.tar.gz",
+  vosk = null,                 // the vosk-browser module, imported by the caller
+  commands = COMMANDS,
+  router = null,
+  deviceId = null,
+  onState = null,              // (state, detail) for the status line
+  nowS = () => performance.now() / 1000,
+  speaking = () => false,      // is the coach talking right now
+} = {}) {
+  if (!vosk) throw new Error("voskListener needs the vosk-browser module");
+  const say = (s, d) => { if (onState) onState(s, d); };
+
+  say("loading", modelUrl);
+  const model = await vosk.createModel(modelUrl);
+
+  const cmd = new model.KaldiRecognizer(16000, JSON.stringify(grammar(commands)));
+  const free = new model.KaldiRecognizer(16000);
+  free.setWords(true);         // per-word confidence, averaged over the window
+
+  // Vosk reports a final result as {result: {text, result: [{word, conf}]}}
+  // and a partial as {result: {partial}}.
+  const feed = final => m => {
+    const res = m.result || {};
+    const text = final ? res.text : res.partial;
+    if (!text) return;
+    const words = res.result || [];
+    const conf = words.length ? words.reduce((a, w) => a + (w.conf ?? 0), 0) / words.length : null;
+    router.result({ text, conf, final, nowS: nowS(), speaking: speaking() });
+    if (final) say("heard", text);
+  };
+  for (const [rec, tag] of [[cmd, "cmd"], [free, "free"]]) {
+    rec.on("result", feed(true));
+    rec.on("partialresult", feed(false));
+    rec.on("error", e => say("error", `${tag}: ${e.message || e}`));
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    },
+  });
+  const ctx = new AudioContext({ sampleRate: 16000 });
+  const source = ctx.createMediaStreamSource(stream);
+  // ScriptProcessor is deprecated but is what vosk-browser's own integration
+  // uses, and it is the one path that works the same in every browser here.
+  const node = ctx.createScriptProcessor(4096, 1, 1);
+  node.onaudioprocess = e => {
+    try { (router.mode === "free" ? free : cmd).acceptWaveform(e.inputBuffer); }
+    catch (err) { say("error", err.message || String(err)); }
+  };
+  source.connect(node);
+  node.connect(ctx.destination);
+  say("listening", null);
+
+  return {
+    get mode() { return router.mode; },
+    async resume() { if (ctx.state === "suspended") await ctx.resume(); },
+    stop() {
+      node.onaudioprocess = null;
+      try { source.disconnect(); node.disconnect(); } catch {}
+      for (const t of stream.getTracks()) t.stop();
+      ctx.close();
+      say("stopped", null);
+    },
+  };
+}
