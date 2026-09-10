@@ -31,8 +31,13 @@ tests/              Node tests for the pure logic (npm test)
 ## Run
 ```bash
 ./serve.sh            # or: npm run serve
-# open http://localhost:8000
+# open http://localhost:8000                    the version without speech
+# open http://localhost:8000/index_voice.html   the same, plus Vosk speech
 ```
+Two entry points over one set of modules: `index.html` does not import
+`speech.js` at all, so the version without speech is the one that was always
+there. Pick one by opening its URL; there is no build step and no branch to
+switch.
 A local server is required because `getUserMedia` only works over http(s)
 or localhost. On first load the browser downloads the MediaPipe models
 (about 10 MB) and caches them. Recent Chrome or Edge recommended; Safari and
@@ -104,13 +109,34 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   being read, so an empty room neither adds nor subtracts, and the share is a
   live ratio of the two stopwatches rather than a third accumulator. `t`
   resets both. In the published state: `elapsed`, `faceTime`, `pctPositive`.
+- **Speech** (`index_voice.html` only, off by default): Vosk through
+  vosk-browser, entirely offline - the model is served from `vendor/`, no audio
+  and no request leaves the machine. A closed list of commands (`COMMANDS` at
+  the top of `speech.js`) becomes a Vosk grammar, which keeps the recogniser
+  small and accurate; anything outside it decodes to `[unk]`, which is in the
+  grammar precisely so stray audio is not forced onto the nearest command.
+  `tell me` opens a free window where a full-vocabulary recogniser transcribes
+  everything said. The window cannot close on a spoken command - in free mode
+  "stop" is just a word, and a visitor saying it mid-sentence would cut
+  themselves off - so silence closes it, though not the first final result,
+  since Vosk emits one at every pause and a mid-thought breath would truncate
+  the answer: it stays open until nothing new has arrived for 1.5 s, with 20 s
+  as the ceiling. The coach is handled twice over: in command mode its lines are
+  not in the grammar, and in free mode a line matching a known coach phrase is
+  dropped while a window it talked over is flagged `coachOverlap` rather than
+  silently trusted - speech that merely *overlaps* the coach cannot be cleaned
+  up textually at all, which is why `echoCancellation` is on. Audio follows the
+  picture: the microphone with the webcam, the file itself when a video is
+  loaded. Recognition runs at 16 kHz, so a loaded video plays back dull; it is a
+  test source, not something an audience listens to.
 - **Session JSON on the Desktop**: everything the session measured, written
   to `~/Desktop/smile_session_<start time>.json` when the page closes (close,
   reload or navigation away, via `sendBeacon`), every 30 s as a safety net,
   and on demand with the panel button or `s`. One file per session, kept up
   to date. It holds: elapsed time, seconds with and without a face, seconds
   smiling and not smiling with the share of face time, seconds per emotion
-  label with mean valence and arousal, blink count and rate, hands (seconds
+  label with mean valence and arousal, blink count and rate, recognised
+  commands and free transcripts with their mean confidence, hands (seconds
   with one and two hands, seconds with the rect up and how many times it
   appeared, total palm travel in pixels and in frame widths), every coach
   verdict with its instant and shares, and a per-minute timeline of face,
