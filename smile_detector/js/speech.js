@@ -30,6 +30,13 @@
  * nothing but partials while it is being spoken: keying the clocks off final
  * results alone closed the window in the middle of it.
  *
+ * For the same reason the transcript cannot come from final results alone.
+ * Vosk finalises on its own endpointing, which lags the silence this window
+ * closes on, so the last thing said is routinely still unfinalised when the
+ * window shuts - and a window that heard a whole sentence produced nothing at
+ * all. The trailing partial is kept and used, flagged `fromPartial` so the
+ * reader knows that tail was never confirmed.
+ *
  * The coach speaks through the same room the microphone listens to. In command
  * mode the grammar already protects us: the coach's lines are not in the word
  * list, so they decode to `[unk]`. In free mode they would be transcribed, so
@@ -106,6 +113,7 @@ export class SpeechRouter {
   reset(nowS = 0) {
     this.mode = "command";
     this.parts = [];       // final results collected in the current free window
+    this.lastPartial = "";  // the utterance still in progress, unfinalised
     this.confs = [];
     this.heard = false;    // anything at all said in this window, partials included
     if (!this.stats) this.stats = {   // survives reset(): it is about the whole session
@@ -161,9 +169,10 @@ export class SpeechRouter {
     if (!this.heard && this.echoesOpen(clean)) return null;   // tail of "tell me"
     this.heard = true;                                        // partials count: they are the sentence
     this.lastSpeechS = nowS;
-    if (!final) return null;
+    if (!final) { this.lastPartial = clean; return null; }    // kept in case the window shuts first
     if (this.coachPhrases.has(clean)) return null;         // the coach, verbatim
     this.parts.push(clean);
+    this.lastPartial = "";                                 // finalised: the partial is now redundant
     if (conf !== null) this.confs.push(conf);
     return null;
   }
@@ -189,6 +198,7 @@ export class SpeechRouter {
   openWindow(nowS) {
     this.mode = "free";
     this.parts = [];
+    this.lastPartial = "";
     this.confs = [];
     this.heard = false;
     this.openedS = nowS;
@@ -200,15 +210,17 @@ export class SpeechRouter {
 
   /** Close the free window and hand over whatever it collected. */
   closeWindow(nowS, endedBy = "silence") {
-    const text = this.parts.join(" ").trim();
+    const fromPartial = !!this.lastPartial;
+    const text = [...this.parts, this.lastPartial].filter(Boolean).join(" ").trim();
     const conf = this.confs.length ? this.confs.reduce((a, b) => a + b, 0) / this.confs.length : null;
     const seg = {
-      kind: "free", text, conf: conf === null ? null : +conf.toFixed(3),
+      kind: "free", text, conf: conf === null ? null : +conf.toFixed(3), fromPartial,
       atS: this.openedS, durationS: +(nowS - this.openedS).toFixed(2),
       coachOverlap: this.overlap, endedBy,
     };
     this.mode = "command";
     this.parts = [];
+    this.lastPartial = "";
     this.confs = [];
     this.heard = false;
     this.overlap = false;

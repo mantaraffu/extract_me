@@ -257,3 +257,36 @@ test("a free result of nothing but markers does not start the clock", () => {
   assert.equal(r.tick(2.1), null);
   assert.deepEqual(segments, []);
 });
+
+test("a window that shuts before Vosk finalises still keeps what it heard", () => {
+  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
+  say(r, OPEN_FREE, 0);
+  // the whole sentence arrives as partials; the final never comes
+  r.result({ text: "i came", final: false, nowS: 1 });
+  r.result({ text: "i came here with", final: false, nowS: 1.5 });
+  r.result({ text: "i came here with my sister", final: false, nowS: 2 });
+  const seg = r.tick(3.6);
+  assert.equal(seg.text, "i came here with my sister");
+  assert.equal(seg.fromPartial, true);
+  assert.equal(segments.length, 1);
+});
+
+test("a finalised utterance drops its partial instead of repeating it", () => {
+  const { r } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
+  say(r, OPEN_FREE, 0);
+  r.result({ text: "i came here", final: false, nowS: 1 });
+  say(r, "i came here", 1.5);             // same words, now final
+  const seg = r.tick(3.1);
+  assert.equal(seg.text, "i came here");  // not "i came here i came here"
+  assert.equal(seg.fromPartial, false);
+});
+
+test("finalised sentences and a trailing unfinalised one are joined", () => {
+  const { r } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
+  say(r, OPEN_FREE, 0);
+  say(r, "first sentence", 1);
+  r.result({ text: "and then some more", final: false, nowS: 2 });
+  const seg = r.tick(3.6);
+  assert.equal(seg.text, "first sentence and then some more");
+  assert.equal(seg.fromPartial, true);
+});

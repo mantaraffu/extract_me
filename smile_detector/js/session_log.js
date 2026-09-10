@@ -108,7 +108,7 @@ export class SessionLog {
     this.speech.free.push({
       atS: +(seg.atS - this.startS).toFixed(1), at: new Date(this.startedAt + (seg.atS - this.startS) * 1000).toISOString(),
       durationS: seg.durationS, text: seg.text, conf: seg.conf, words,
-      coachOverlap: seg.coachOverlap, endedBy: seg.endedBy,
+      coachOverlap: seg.coachOverlap, endedBy: seg.endedBy, fromPartial: !!seg.fromPartial,
     });
     this.minuteRow(nowS).words += words;
   }
