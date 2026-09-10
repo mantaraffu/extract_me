@@ -32,6 +32,7 @@ export class SessionLog {
     this.prevRect = false;
     this.verdicts = [];
     this.speech = { commands: [], free: [] };
+    this.speechDiag = null;         // whatever the recogniser can say about itself
     this.timeline = [];
   }
 
@@ -112,6 +113,15 @@ export class SessionLog {
     this.minuteRow(nowS).words += words;
   }
 
+  /**
+   * What the speech layer knows about itself, written straight into the JSON.
+   * A session with no transcript is otherwise indistinguishable from one where
+   * speech was switched off, and the file is the only thing that survives it.
+   */
+  speechStats(diag) {
+    this.speechDiag = diag || null;
+  }
+
   minuteRow(nowS) {
     const m = Math.max(0, Math.floor((nowS - this.startS) / 60));
     while (this.timeline.length <= m) this.timeline.push(newMinute(this.timeline.length));
@@ -155,6 +165,7 @@ export class SessionLog {
           commands: this.speech.commands.length, freeSegments: this.speech.free.length,
           words: this.speech.free.reduce((n, f) => n + f.words, 0),
         },
+        diagnostics: this.speechDiag,
       },
       timeline: this.timeline.map(t => ({ minute: t.minute, faceS: r(t.faceS), smilingS: r(t.smilingS), blinks: t.blinks, handsS: r(t.handsS), commands: t.commands, words: t.words })),
     };

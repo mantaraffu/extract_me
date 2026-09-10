@@ -731,6 +731,11 @@ if (window.SMILE_SPEECH) initSpeech();
  * uses fetch so the reply (the path written) can be shown.
  */
 function sessionBody(reason) {
+  // the recogniser's own account of the session, so a JSON with no transcript
+  // still says which link of the chain broke
+  if (state.log && state.speech) {
+    state.log.speechStats({ ...state.speech.stats, ...(state.speechListener?.stats || { listener: "never started" }) });
+  }
   return JSON.stringify(state.log.toJSON({ nowS: performance.now() / 1000, reason }), null, 2);
 }
 function saveSession(reason) {

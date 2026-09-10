@@ -124,3 +124,13 @@ test("speech: an empty session still carries the section", () => {
   assert.deepEqual(j.speech.free, []);
   assert.deepEqual(j.speech.counts, { commands: 0, freeSegments: 0, words: 0 });
 });
+
+test("speech diagnostics ride along in the JSON, null when never set", () => {
+  const log = new SessionLog({ nowS: 0 });
+  assert.equal(log.toJSON({ nowS: 1 }).speech.diagnostics, null);
+  log.speechStats({ finals: 3, unmatched: ["tell me the"], chunks: 900, rms: 0.21 });
+  const j = log.toJSON({ nowS: 2 });
+  assert.equal(j.speech.diagnostics.finals, 3);
+  assert.equal(j.speech.diagnostics.chunks, 900);
+  assert.deepEqual(j.speech.diagnostics.unmatched, ["tell me the"]);
+});

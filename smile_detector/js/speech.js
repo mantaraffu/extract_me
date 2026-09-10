@@ -93,6 +93,9 @@ export class SpeechRouter {
     this.parts = [];       // final results collected in the current free window
     this.confs = [];
     this.heard = false;    // anything at all said in this window, partials included
+    if (!this.stats) this.stats = {   // survives reset(): it is about the whole session
+      finals: 0, partials: 0, unknown: 0, opened: 0, matched: 0, unmatched: [],
+    };
     this.openedS = nowS;
     this.lastSpeechS = nowS;
     this.overlap = false;  // the coach spoke at some point during this window
@@ -119,9 +122,18 @@ export class SpeechRouter {
     const clean = normalize(text);
     if (speaking) this.overlap = true;
 
+    if (final) this.stats.finals++; else this.stats.partials++;
+    if (clean === UNK) this.stats.unknown++;
+
     if (this.mode === "command") {
       if (!final || !clean || clean === UNK) return null;
-      if (!this.commands.includes(clean)) return null;     // outside the grammar
+      if (!this.commands.includes(clean)) {                // outside the grammar
+        // what it heard instead is the one thing worth keeping: a grammar that
+        // never matches looks exactly like a microphone that never worked.
+        if (this.stats.unmatched.length < 12) this.stats.unmatched.push(clean);
+        return null;
+      }
+      this.stats.matched++;
       if (clean === this.openFree) { this.openWindow(nowS); return null; }
       this.last = { kind: "command", command: clean, atS: nowS };
       if (this.onCommand) this.onCommand(this.last);
@@ -166,6 +178,7 @@ export class SpeechRouter {
     this.openedS = nowS;
     this.lastSpeechS = nowS;
     this.overlap = false;
+    this.stats.opened++;
     if (this.onOpen) this.onOpen({ atS: nowS });
   }
 
@@ -230,7 +243,8 @@ export async function voskListener({
   speaking = () => false,      // is the coach talking right now
 } = {}) {
   if (!vosk) throw new Error("voskListener needs the vosk-browser module");
-  const say = (s, d) => { if (onState) onState(s, d); };
+  const say = (s, d) => { statsState(s, d); if (onState) onState(s, d); };
+  let statsState = () => {};
 
   say("loading", modelUrl);
   const model = await vosk.createModel(modelUrl);
@@ -261,7 +275,16 @@ export async function voskListener({
   // uses, and it is the one path that behaves the same in every browser here.
   // Its output buffer is never written, so it feeds the speakers silence.
   const proc = ctx.createScriptProcessor(4096, 1, 1);
+  const stats = { chunks: 0, state: "starting", source: null, rms: 0 };
+  statsState = (st, d) => { stats.state = d ? `${st}: ${d}` : st; };
   proc.onaudioprocess = e => {
+    stats.chunks++;
+    // peak level over the session: a silent input and a missing input look the
+    // same in the transcript, and only one of them is a wiring problem.
+    const d = e.inputBuffer.getChannelData(0);
+    let peak = 0;
+    for (let i = 0; i < d.length; i += 16) { const v = Math.abs(d[i]); if (v > peak) peak = v; }
+    if (peak > stats.rms) stats.rms = +peak.toFixed(4);
     try { (router.mode === "free" ? free : cmd).acceptWaveform(e.inputBuffer); }
     catch (err) { say("error", err.message || String(err)); }
   };
@@ -303,6 +326,7 @@ export async function voskListener({
 
   return {
     setSource,
+    get stats() { return { ...stats, source: kind }; },
     get mode() { return router.mode; },
     get source() { return kind; },
     async resume() { if (ctx.state === "suspended") await ctx.resume(); },
