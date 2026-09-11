@@ -16,9 +16,18 @@
  * where it begins and ends.
  *
  * Vosk finalises on its own endpointing, which lags: the last thing said is
- * routinely still unfinalised when recording stops. The trailing partial is
- * therefore kept and joined on, cleared whenever a final supersedes it so
- * nothing is counted twice.
+ * routinely still unfinalised when recording stops. `voskListener.finalize`
+ * asks it to finalise before the switch goes off, which returns a real result -
+ * words, timings and confidences - rather than the bare text a partial carries.
+ * The trailing partial is still kept and joined on as a fallback, cleared
+ * whenever a final supersedes it, in case that flush yields nothing.
+ *
+ * Per-word timings are kept, and moved onto the session's clock. Vosk counts
+ * from the start of the audio it was given, and it is given audio only while
+ * recording, so its clock runs slow by every pause: each stretch of recording
+ * anchors the offset between the two. The mapping tracks fed audio against wall
+ * time and can drift slightly if chunks are dropped - close enough to line words
+ * up against smiles, not a timecode.
  *
  * The coach speaks into the room the microphone listens to. Its lines are
  * known, so one matching a coach phrase is dropped outright; speech that
@@ -52,6 +61,50 @@ export function stripUnk(clean) {
   return clean.split(" ").filter(w => w && w !== UNK_WORD).join(" ");
 }
 
+/**
+ * Words that say nothing about what a session was about. The ranking exists to
+ * surface subject matter, and without this list it reports "the", "and", "i"
+ * every single time. Demonstratives are in it for the same reason: "this" and
+ * "that" are frequent everywhere and specific to nothing.
+ *
+ * Edit it here. It is deliberately a plain list rather than a cleverer rule:
+ * what counts as noise depends on what the installation is asking people.
+ */
+export const STOP_WORDS = new Set(`
+a about above after again against all am an and any are as at
+be because been before being below between both but by
+can cannot could
+did do does doing don down during
+each few for from further
+had has have having he her here hers herself him himself his how
+i if in into is it its itself
+just
+me more most my myself
+no nor not now
+of off on once only or other our ours ourselves out over own
+same she should so some such
+than that the their theirs them themselves then there these they this those through to too
+under until up
+very
+was we were what when where which while who whom why will with would
+you your yours yourself yourselves
+yeah yes ok okay like got get go going really thing things kind sort
+`.trim().split(/\s+/));
+
+/** The `n` most frequent words that carry meaning, most frequent first. */
+export function topWords(text, n = 5, stop = STOP_WORDS) {
+  const counts = new Map();
+  for (const w of (text || "").split(" ")) {
+    // single letters survive normalization ("a", "i") and are never the subject
+    if (!w || w.length < 2 || stop.has(w)) continue;
+    counts.set(w, (counts.get(w) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))   // alphabetical on ties, so it is stable
+    .slice(0, n)
+    .map(([word, count]) => ({ word, count }));
+}
+
 export class Transcriber {
   constructor({ coachPhrases = [], onText = null, nowS = 0 } = {}) {
     this.coachPhrases = new Set(coachPhrases.map(normalize));
@@ -65,9 +118,11 @@ export class Transcriber {
     this.parts = [];
     this.lastPartial = "";
     this.confs = [];
+    this.wordList = [];
     this.recording = false;
     this.recordedS = 0;
     this.startedS = null;
+    this.anchor = null;    // {atS, stream}: session time of a point on Vosk's clock
     this.lastS = nowS;
   }
 
@@ -77,6 +132,9 @@ export class Transcriber {
     if (on) {
       this.recording = true;
       this.startedS = nowS;
+      // Vosk has been fed `recordedS` of audio so far, and is about to be fed
+      // more starting now: that pairs its clock with the session's.
+      this.anchor = { atS: nowS, stream: this.recordedS };
     } else {
       this.recording = false;
       this.recordedS += Math.max(0, nowS - (this.startedS ?? nowS));
@@ -98,7 +156,13 @@ export class Transcriber {
    * are the sentence in progress and are kept in case recording stops first.
    * `speaking` is whether the coach was talking as this arrived.
    */
-  result({ text, conf = null, final = false, nowS = 0, speaking = false }) {
+  /** A Vosk word time moved onto the session clock. */
+  atSession(streamS) {
+    if (!this.anchor || typeof streamS !== "number") return null;
+    return +(this.anchor.atS + (streamS - this.anchor.stream)).toFixed(2);
+  }
+
+  result({ text, conf = null, final = false, nowS = 0, speaking = false, words = null }) {
     if (!this.recording) return null;
     const raw = normalize(text);
     const clean = stripUnk(raw);
@@ -113,6 +177,14 @@ export class Transcriber {
     this.parts.push(clean);
     this.lastPartial = "";                // finalised: the partial is now redundant
     if (conf !== null) this.confs.push(conf);
+    for (const w of words || []) {
+      if (!w || !w.word) continue;
+      this.wordList.push({
+        word: normalize(w.word),
+        atS: this.atSession(w.start), endS: this.atSession(w.end),
+        conf: typeof w.conf === "number" ? +w.conf.toFixed(3) : null,
+      });
+    }
     if (this.onText) this.onText(this.text());
     return this.text();
   }
@@ -133,6 +205,16 @@ export class Transcriber {
   words() {
     const t = this.text();
     return t ? t.split(" ").length : 0;
+  }
+
+  /** Every word heard, with its instant on the session clock. */
+  wordTimings() {
+    return this.wordList;
+  }
+
+  /** The `n` most frequent meaningful words of the transcript. */
+  top(n = 5) {
+    return topWords(this.text(), n);
   }
 
   /** Mean confidence over the finalised utterances, null when there are none. */
@@ -188,13 +270,15 @@ export async function voskListener({
 
   // Vosk reports a final result as {result: {text, result: [{word, conf}]}}
   // and a partial as {result: {partial}}.
+  let onFinal = null;          // set while a flush is waiting for its result
   const feed = final => m => {
     const res = m.result || {};
     const text = final ? res.text : res.partial;
+    if (final && onFinal) { const f = onFinal; onFinal = null; f(); }
     if (!text) return;
     const words = res.result || [];
     const conf = words.length ? words.reduce((a, w) => a + (w.conf ?? 0), 0) / words.length : null;
-    transcriber.result({ text, conf, final, nowS: nowS(), speaking: speaking() });
+    transcriber.result({ text, conf, final, nowS: nowS(), speaking: speaking(), words });
     if (final) say("heard", text);
   };
   rec.on("result", feed(true));
@@ -262,6 +346,22 @@ export async function voskListener({
 
   return {
     setSource,
+    /**
+     * Ask Vosk to finalise whatever it is still holding, and wait for it.
+     * Its own endpointing lags the moment a person stops talking, so without
+     * this the last sentence arrives - if at all - after the recorder is
+     * already off. Resolves on the flushed result, or gives up after `waitMs`
+     * so a recogniser with nothing to say cannot hang the switch.
+     */
+    finalize(waitMs = 1500) {
+      if (typeof rec.retrieveFinalResult !== "function") return Promise.resolve(false);
+      return new Promise(resolve => {
+        const timer = setTimeout(() => { onFinal = null; resolve(false); }, waitMs);
+        onFinal = () => { clearTimeout(timer); resolve(true); };
+        try { rec.retrieveFinalResult(); }
+        catch { clearTimeout(timer); onFinal = null; resolve(false); }
+      });
+    },
     get stats() { return { ...stats, source: kind, context: ctx.state }; },
     async resume() { if (ctx.state === "suspended") await ctx.resume(); },
     /** Stops listening. The context stays open on purpose: a file whose audio

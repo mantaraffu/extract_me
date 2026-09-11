@@ -120,6 +120,8 @@ export class SessionLog {
       endedAt: new Date(this.startedAt + elapsedS * 1000).toISOString(),
       recordedS: t.recordedS, words: t.words, conf: t.conf,
       text: t.text,
+      top: t.top || [],
+      timings: t.timings || [],
       diagnostics: this.speechDiag,
     };
   }

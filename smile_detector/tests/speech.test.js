@@ -154,3 +154,77 @@ test("reset empties the transcript but keeps the session counters", () => {
   assert.equal(t.recording, false);
   assert.equal(t.stats.finals, 1);
 });
+
+// --- word ranking ---
+
+test("the ranking drops stop words and demonstratives", async () => {
+  const { topWords } = await import("../js/speech.js");
+  const top = topWords("this is the thing that i think that this sister said to that sister");
+  assert.deepEqual(top.map(t => t.word), ["sister", "said", "think"]);
+});
+
+test("the ranking is ordered by count, alphabetical on ties", async () => {
+  const { topWords } = await import("../js/speech.js");
+  const top = topWords("banana apple banana cherry apple banana cherry", 5);
+  assert.deepEqual(top, [
+    { word: "banana", count: 3 },
+    { word: "apple", count: 2 },
+    { word: "cherry", count: 2 },
+  ]);
+});
+
+test("the ranking keeps at most five, and copes with nothing to rank", async () => {
+  const { topWords } = await import("../js/speech.js");
+  assert.equal(topWords("one two three four five six seven eight").length, 5);
+  assert.deepEqual(topWords(""), []);
+  assert.deepEqual(topWords("the and this that i was"), []);   // all stop words
+});
+
+test("the transcriber ranks its own transcript", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  say(t, "my sister and my sister laughed", 1);
+  assert.deepEqual(t.top(2), [{ word: "sister", count: 2 }, { word: "laughed", count: 1 }]);
+});
+
+// --- per-word timings on the session clock ---
+
+test("word timings are moved onto the session clock", () => {
+  const { t } = make();
+  t.setRecording(true, 100);                 // the session is 100 s in
+  t.result({
+    text: "hello there", final: true, nowS: 102,
+    words: [{ word: "hello", start: 0.5, end: 0.9, conf: 0.8 },
+            { word: "there", start: 1.0, end: 1.4, conf: 0.6 }],
+  });
+  assert.deepEqual(t.wordTimings(), [
+    { word: "hello", atS: 100.5, endS: 100.9, conf: 0.8 },
+    { word: "there", atS: 101.0, endS: 101.4, conf: 0.6 },
+  ]);
+});
+
+test("a pause in recording does not shift later words", () => {
+  const { t } = make();
+  t.setRecording(true, 10);
+  t.result({ text: "one", final: true, nowS: 11, words: [{ word: "one", start: 0.5, end: 0.8, conf: 1 }] });
+  t.setRecording(false, 15);                 // 5 s of audio fed so far
+  t.setRecording(true, 300);                 // resumed much later
+  // Vosk keeps counting from its own start: 5 s of stream, now at session 300
+  t.result({ text: "two", final: true, nowS: 301, words: [{ word: "two", start: 5.5, end: 5.8, conf: 1 }] });
+  assert.equal(t.wordTimings()[0].atS, 10.5);
+  assert.equal(t.wordTimings()[1].atS, 300.5);
+});
+
+test("words without timings do not poison the list", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  t.result({ text: "hm", final: true, nowS: 1, words: [{ word: "hm" }] });
+  assert.deepEqual(t.wordTimings(), [{ word: "hm", atS: null, endS: null, conf: null }]);
+});
+
+test("partials contribute no words: only a final is confirmed", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  t.result({ text: "hello", final: false, nowS: 1, words: [{ word: "hello", start: 0.1, end: 0.2, conf: 1 }] });
+  assert.deepEqual(t.wordTimings(), []);
+});

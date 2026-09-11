@@ -736,8 +736,17 @@ async function initSpeech() {
     }
   }
 
-  function syncRecording() {
+  /**
+   * Stopping asks Vosk to finalise first, and waits: its endpointing lags the
+   * moment somebody stops talking, so the last sentence would otherwise land
+   * after the recorder was already off - or not at all.
+   */
+  async function syncRecording() {
     const on = !!(ui.speechRec?.checked && listener);
+    if (!on && state.speech.recording && listener) {
+      setSpeechInfo("finishing the last sentence...");
+      await listener.finalize();
+    }
     state.speech.setRecording(on, performance.now() / 1000);
     console.log(`[speech] recording ${on ? "on" : "off"}`);
     if (on) setSpeechInfo("recording");
@@ -791,6 +800,7 @@ function sessionBody(reason) {
     state.log.transcript({
       text: state.speech.text(), words: state.speech.words(),
       conf: state.speech.confidence(), recordedS: +state.speech.seconds(nowS).toFixed(2),
+      top: state.speech.top(5), timings: state.speech.wordTimings(),
       file: state.transcriptFile, sessionFile: state.logFile,
     });
     state.log.speechStats({
