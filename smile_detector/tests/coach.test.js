@@ -369,3 +369,29 @@ test("browserSpeaker: an exact tag wins over a variant", async () => {
     assert.equal(calls.spoken.at(-1).voice?.name, "Sam");
   } finally { dropFakeSpeech(); }
 });
+
+test("browserSpeaker: the system's own voice wins, when it is English", async () => {
+  const { browserSpeaker } = await import("../js/coach.js");
+  // getVoices() lists the good and the ancient together: "Ralph" is first here
+  const calls = fakeSpeech([
+    { name: "Ralph", lang: "en-US" },
+    { name: "Samantha", lang: "en-US", default: true },
+    { name: "Alice", lang: "it-IT" },
+  ]);
+  try {
+    browserSpeaker({ lang: "en_US" })("hi");
+    assert.equal(calls.spoken.at(-1).voice?.name, "Samantha");
+  } finally { dropFakeSpeech(); }
+});
+
+test("browserSpeaker: a default in another language is ignored", async () => {
+  const { browserSpeaker } = await import("../js/coach.js");
+  const calls = fakeSpeech([
+    { name: "Alice", lang: "it-IT", default: true },
+    { name: "Sam", lang: "en-US" },
+  ]);
+  try {
+    browserSpeaker({ lang: "en_US" })("hi");
+    assert.equal(calls.spoken.at(-1).voice?.name, "Sam", "took the Italian default");
+  } finally { dropFakeSpeech(); }
+});

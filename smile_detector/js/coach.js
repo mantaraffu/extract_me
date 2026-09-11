@@ -181,9 +181,19 @@ export function browserSpeaker({ lang = "en_US", rate = 0.7, onState = null } = 
   function pick() {
     const voices = speechSynthesis.getVoices() || [];
     if (!voices.length) return null;      // not loaded yet: ask again next time
-    const match = voices.find(v => tag(v.lang) === want)
+    const sameLanguage = v => tag(v.lang).split("-")[0] === base;
+    const match =
+      // The system default first, when it happens to be English. getVoices()
+      // lists the good voices beside the ancient robotic ones, in no useful
+      // order, so taking the first match can sound markedly worse than letting
+      // the machine use what it was configured to use. On an English-configured
+      // machine that is why leaving the voice unset sounded better; this takes
+      // that voice deliberately rather than by accident, and on a machine
+      // configured in another language it simply does not apply.
+      voices.find(v => v.default && sameLanguage(v))
+      || voices.find(v => tag(v.lang) === want)
       || voices.find(v => tag(v.lang).startsWith(`${want}-`))
-      || voices.find(v => tag(v.lang).split("-")[0] === base);
+      || voices.find(v => sameLanguage(v));
     missing = !match;                     // the list is loaded and has no such language
     return match || null;
   }

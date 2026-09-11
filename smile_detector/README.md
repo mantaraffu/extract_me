@@ -98,9 +98,12 @@ session JSON.
   with no face at all counts as 0% happy. Speech is the browser's Web Speech API, pinned to an
   English voice: leaving the voice unset does not mean "some English voice", it
   means the system default, which on an Italian machine is an Italian voice
-  reading English lines. The search widens instead of giving up - the exact tag,
-  then any variant of it, then any English voice at all - and never crosses into
-  another language; a machine with no English voice installed says so through
+  reading English lines. The system's own default voice comes first when it happens to
+  be English: `getVoices()` lists the good voices beside the ancient robotic
+  ones in no useful order, so taking the first match can sound markedly worse
+  than what the machine was configured to use. From there the search widens
+  rather than giving up - the exact tag, then any variant of it, then any
+  English voice at all - and it never crosses into another language; a machine with no English voice installed says so through
   the status line rather than quietly sounding Italian. Voices load
   asynchronously and `getVoices()` is usually empty on the first call, which is
   when the first verdict lands, so the choice is retried and redone when the
