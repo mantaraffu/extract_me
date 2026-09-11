@@ -173,12 +173,37 @@ export class SmileCoach {
 export function browserSpeaker({ lang = "en_US", rate = 0.7, onState = null } = {}) {
   if (typeof speechSynthesis === "undefined" || typeof SpeechSynthesisUtterance === "undefined") return null;
   let current = null;   // held on purpose: Firefox drops an utterance that gets garbage-collected mid-speech
+  const tag = t => (t || "").toLowerCase().replace(/_/g, "-");
+  const want = tag(lang);
+  const base = want.split("-")[0];        // "en" out of "en-US"
+
+  let chosen = null, missing = false;
+  function pick() {
+    const voices = speechSynthesis.getVoices() || [];
+    if (!voices.length) return null;      // not loaded yet: ask again next time
+    const match = voices.find(v => tag(v.lang) === want)
+      || voices.find(v => tag(v.lang).startsWith(`${want}-`))
+      || voices.find(v => tag(v.lang).split("-")[0] === base);
+    missing = !match;                     // the list is loaded and has no such language
+    return match || null;
+  }
+  // Re-pick when the list finally arrives, so the first line is not the one
+  // that misses out.
+  if (typeof speechSynthesis.addEventListener === "function") {
+    speechSynthesis.addEventListener("voiceschanged", () => { chosen = pick(); });
+  }
 
   return text => {
+    if (!chosen) chosen = pick();
     const u = new SpeechSynthesisUtterance(text);
-    const voice = speechSynthesis.getVoices().find(v => v.lang.toLowerCase().startsWith(lang));
-    if (voice) u.voice = voice;
-    u.lang = voice?.lang || lang;
+    if (chosen) {
+      u.voice = chosen;
+      u.lang = chosen.lang;
+    } else {
+      // Never inherit the system locale silently.
+      u.lang = want;
+      if (missing) onState?.("error", text, `no ${base} voice installed: the system voice will be used`);
+    }
     u.rate = rate;
     u.onstart = () => onState?.("speaking", text);
     u.onend = () => onState?.("done", text);
