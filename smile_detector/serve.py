@@ -27,9 +27,17 @@ def save_dir():
 
 
 class NoCacheHandler(SimpleHTTPRequestHandler):
+    """Source is never cached, so an edit shows up on reload. The blobs under
+    vendor/ are the opposite case: 44 MB of library and model that never change,
+    and re-fetching them on every reload is the difference between a page that
+    starts and one that sits on "waiting for localhost"."""
+
     def end_headers(self):
-        self.send_header("Cache-Control", "no-store, must-revalidate")
-        self.send_header("Expires", "0")
+        if self.path.startswith("/vendor/"):
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        else:
+            self.send_header("Cache-Control", "no-store, must-revalidate")
+            self.send_header("Expires", "0")
         super().end_headers()
 
     def log_message(self, fmt, *args):
