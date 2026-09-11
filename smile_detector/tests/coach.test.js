@@ -267,7 +267,7 @@ test("browserSpeaker: null without the API, English voice with it", async () => 
   } finally { dropFakeSpeech(); }
 });
 
-test("browserSpeaker: reports blocked, error and speaking; ignores its own interruptions", async () => {
+test("browserSpeaker: reports blocked, error, speaking, done - and lines cut off", async () => {
   const { browserSpeaker } = await import("../js/coach.js");
   const calls = fakeSpeech();
   try {
@@ -276,13 +276,25 @@ test("browserSpeaker: reports blocked, error and speaking; ignores its own inter
     speak("one");
     const u = calls.spoken[0];
     u.onerror({ error: "not-allowed" });
-    u.onerror({ error: "interrupted" });
+    u.onerror({ error: "interrupted" });      // not a fault, but not nothing either
     u.onerror({ error: "synthesis-failed" });
     u.onstart(); u.onend();
     assert.deepEqual(seen, [
-      ["blocked", "one", "not-allowed"], ["error", "one", "synthesis-failed"],
+      ["blocked", "one", "not-allowed"], ["cut", "one", "interrupted"],
+      ["error", "one", "synthesis-failed"],
       ["speaking", "one", undefined], ["done", "one", undefined],
     ]);
+  } finally { dropFakeSpeech(); }
+});
+
+test("browserSpeaker: a line cut off is reported as cut, never as an error", async () => {
+  const { browserSpeaker } = await import("../js/coach.js");
+  const calls = fakeSpeech();
+  try {
+    const seen = [];
+    browserSpeaker({ onState: (st, t, d) => seen.push(st) })("one");
+    calls.spoken[0].onerror({ error: "canceled" });
+    assert.deepEqual(seen, ["cut"]);
   } finally { dropFakeSpeech(); }
 });
 

@@ -104,6 +104,7 @@ const state = {
   pctTalk: null,                 // 0-100 of elapsed spent talking, null without a transcriber
   talkCoach: null,               // TalkCoach while the talk verdicts are on
   lastSpoke: { atS: -1e9, who: null },  // who last handed a line to the voice, and when
+  voice: { started: 0, done: 0, cut: 0, blocked: 0, errors: 0, lastCut: null },
 };
 
 const setStatus = msg => { ui.status.textContent = msg; };
@@ -664,6 +665,15 @@ function loadCoachSettings() {
 
 /** Speech feedback in the status line; a blocked line is retried on the next click. */
 function onVoiceState(st, text, detail) {
+  // Counted per line, so a verdict handed over can be told apart from one that
+  // reached the room: started but never done means it was cut off.
+  const v = state.voice;
+  if (st === "speaking") v.started++;
+  else if (st === "done") v.done++;
+  else if (st === "cut") { v.cut++; v.lastCut = text; }
+  else if (st === "blocked") v.blocked++;
+  else if (st === "error") v.errors++;
+  if (st === "cut") { console.log(`[voice] cut off: "${text}" (${detail})`); return; }
   if (st === "speaking") { state.blockedText = null; setStatus(`voice: "${text}"`); }
   else if (st === "blocked") { state.blockedText = text; setStatus("voice blocked by the browser: click anywhere on the page to enable it"); }
   else if (st === "error") setStatus(`voice error: ${detail}`);
@@ -932,6 +942,9 @@ function sessionBody(reason) {
       nextInS: state.talkCoach ? +state.talkCoach.nextInS(performance.now() / 1000).toFixed(1) : null,
       voice: state.speak ? "ready" : "never used",
       blocked: state.blockedText ? "yes" : "no",
+      // handed over vs actually heard out: `started` without `done` is a line
+      // that was cut off before it reached the room
+      utterances: { ...state.voice },
       smileCoach: state.coach ? "on" : "off",
     });
   }

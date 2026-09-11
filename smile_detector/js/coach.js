@@ -300,8 +300,11 @@ export function browserSpeaker({ lang = "en_US", rate = 0.7, onState = null } = 
     u.onstart = () => onState?.("speaking", text);
     u.onend = () => onState?.("done", text);
     u.onerror = e => {
-      // cutting the previous line short is not an error worth reporting
-      if (e.error === "interrupted" || e.error === "canceled") return;
+      // Cutting the previous line short is not a fault, but it is not nothing
+      // either: a line that never reaches the room looks exactly like one that
+      // was never said, and swallowing it made a coach silenced by the other
+      // one indistinguishable from a coach that never spoke.
+      if (e.error === "interrupted" || e.error === "canceled") { onState?.("cut", text, e.error); return; }
       onState?.(e.error === "not-allowed" ? "blocked" : "error", text, e.error);
     };
     current = u;
