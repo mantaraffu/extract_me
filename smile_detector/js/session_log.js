@@ -33,6 +33,7 @@ export class SessionLog {
     this.verdicts = [];
     this.speech = null;             // one transcript for the session, set at save time
     this.speechDiag = null;         // whatever the recogniser can say about itself
+    this.coachDiag = null;          // and whatever the talk coach can
     this.timeline = [];
   }
 
@@ -135,6 +136,12 @@ export class SessionLog {
    * A session with no transcript is otherwise indistinguishable from one where
    * speech was switched off, and the file is the only thing that survives it.
    */
+  /** What the talk coach can say about itself. In the session file, which is
+   *  always written - a silent session produces no transcript to hide it in. */
+  coachStats(diag) {
+    this.coachDiag = diag || null;
+  }
+
   speechStats(diag) {
     this.speechDiag = diag || null;
   }
@@ -175,7 +182,7 @@ export class SessionLog {
         travelPx: Math.round(this.hands.travelPx),
         travelFrameWidths: this.frameWidth > 0 ? r(this.hands.travelPx / this.frameWidth) : null,
       },
-      coach: { verdicts: this.verdicts, counts },
+      coach: { verdicts: this.verdicts, counts, talk: this.coachDiag },
       speech: this.speech?.text
         ? { transcript: this.speech.file || null, words: this.speech.words, recordedS: this.speech.recordedS }
         : null,

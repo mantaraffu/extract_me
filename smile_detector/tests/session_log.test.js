@@ -146,3 +146,15 @@ test("speech: the ranking line is the last thing in the transcript file", () => 
   assert.equal(t.top3, "1: sister 2: laughed");
   assert.equal(Object.keys(t).at(-1), "top3", "the ranking has to come last");
 });
+
+test("coach: the talk diagnostics live in the session file, which is always written", () => {
+  const log = new SessionLog({ nowS: 0 });
+  assert.equal(log.toJSON({ nowS: 1 }).coach.talk, null);
+  log.coachStats({ talk: "on", built: true, verdicts: 3, spoken: 3, postponed: 1 });
+  const j = log.toJSON({ nowS: 2 });
+  assert.equal(j.coach.talk.talk, "on");
+  assert.equal(j.coach.talk.verdicts, 3);
+  assert.equal(j.coach.talk.spoken, 3);
+  // a silent session writes no transcript, so this cannot live there instead
+  assert.equal(log.transcriptJSON({ nowS: 2 }), null);
+});

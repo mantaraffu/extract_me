@@ -179,6 +179,9 @@ export class TalkCoach {
     this.retryS = retryS;
     this.speak = speak;
     this.canSpeak = canSpeak;
+    // Kept across resets: they describe the session, and a coach that never
+    // spoke is indistinguishable from one that was never switched on.
+    this.stats = { verdicts: 0, postponed: 0, spoken: 0, noSpeaker: 0 };
     this.reset(nowS);
   }
 
@@ -200,6 +203,7 @@ export class TalkCoach {
     if (nowS < this.dueS) return null;
     if (this.canSpeak && !this.canSpeak(nowS)) {
       this.dueS = nowS + this.retryS;   // the other coach has the voice: come back
+      this.stats.postponed++;
       return null;
     }
     return this.check(share, nowS);
@@ -212,7 +216,11 @@ export class TalkCoach {
     const text = kind === "more" ? TALK_MORE : TALK_LESS;
     this.dueS = nowS + this.everyS;
     this.last = { kind, text, frac, atS: nowS };
-    if (this.speak) this.speak(text);
+    this.stats.verdicts++;
+    // `spoken` counts what the voice actually accepted: a verdict reached
+    // without one is the difference between a silent coach and a missing one.
+    if (this.speak) { if (this.speak(text) !== false) this.stats.spoken++; else this.stats.noSpeaker++; }
+    else this.stats.noSpeaker++;
     return this.last;
   }
 }

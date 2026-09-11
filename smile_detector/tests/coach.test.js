@@ -505,3 +505,34 @@ test("talkCoach: the other coach speaking still pushes it back", async () => {
   assert.deepEqual(spoken, []);
   assert.ok(c.feed(0, 18), "never came back");
 });
+
+test("talkCoach: counts what it delivered and what the voice took", async () => {
+  const { TalkCoach } = await import("../js/coach.js");
+  const heard = new TalkCoach({ firstS: 1, everyS: 5, speak: () => true, nowS: 0 });
+  for (let t = 0; t <= 20; t += 0.5) heard.feed(0, t);
+  assert.equal(heard.stats.verdicts, 4);
+  assert.equal(heard.stats.spoken, 4);
+  assert.equal(heard.stats.noSpeaker, 0);
+
+  // a verdict reached with no voice to take it: silent for a different reason
+  const mute = new TalkCoach({ firstS: 1, everyS: 5, speak: () => false, nowS: 0 });
+  for (let t = 0; t <= 20; t += 0.5) mute.feed(0, t);
+  assert.equal(mute.stats.verdicts, 4);
+  assert.equal(mute.stats.spoken, 0);
+  assert.equal(mute.stats.noSpeaker, 4);
+});
+
+test("talkCoach: postponements are counted apart from verdicts", async () => {
+  const { TalkCoach } = await import("../js/coach.js");
+  let busy = true;
+  const c = new TalkCoach({
+    firstS: 1, everyS: 5, retryS: 2,
+    canSpeak: () => !busy, speak: () => true, nowS: 0,
+  });
+  c.feed(0, 1); c.feed(0, 3);
+  assert.equal(c.stats.postponed, 2);
+  assert.equal(c.stats.verdicts, 0);
+  busy = false;
+  c.feed(0, 5);
+  assert.equal(c.stats.verdicts, 1);
+});

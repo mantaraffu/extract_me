@@ -888,7 +888,9 @@ async function initSpeech() {
       // verdict it had just spoken, and the coach fell silent by degrees.
       canSpeak: t => state.lastSpoke.who === "talk" || t - state.lastSpoke.atS >= VOICE_GAP_S,
       speak: text => {
-        if (ensureSpeaker()) state.speak(text, "talk");
+        if (!ensureSpeaker()) return false;      // no speech synthesis at all
+        state.speak(text, "talk");
+        return true;
       },
     });
     setTalkInfo(`on: first verdict in ${formatDuration(state.talkCoach.nextInS(performance.now() / 1000))}`);
@@ -921,6 +923,18 @@ if (window.SMILE_SPEECH) initSpeech();
 function sessionBody(reason) {
   // the recogniser's own account of the session, so a JSON with no transcript
   // still says which link of the chain broke
+  if (state.log) {
+    state.log.coachStats({
+      talk: ui.talk ? (ui.talk.checked ? "on" : "off") : "absent",
+      built: !!state.talkCoach,
+      ...(state.talkCoach ? state.talkCoach.stats : {}),
+      lastVerdict: state.talkCoach?.last ? state.talkCoach.last.text : null,
+      nextInS: state.talkCoach ? +state.talkCoach.nextInS(performance.now() / 1000).toFixed(1) : null,
+      voice: state.speak ? "ready" : "never used",
+      blocked: state.blockedText ? "yes" : "no",
+      smileCoach: state.coach ? "on" : "off",
+    });
+  }
   if (state.log && state.speech) {
     const nowS = performance.now() / 1000;
     state.log.transcript({
