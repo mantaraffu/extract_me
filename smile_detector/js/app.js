@@ -33,8 +33,8 @@ const ui = {
   emotion: $("emotion"), vitEvery: $("vitEvery"),
   posTimer: $("posTimer"), zoom: $("zoom"),
   coach: $("coach"), coachFirst: $("coachFirst"), coachEvery: $("coachEvery"), coachThresh: $("coachThresh"), coachTest: $("coachTest"),
-  speech: $("speech"), speechMax: $("speechMax"), speechSilence: $("speechSilence"),
-  speechModel: $("speechModel"), speechLib: $("speechLib"), speechInfo: $("speechInfo"), speechLead: $("speechLead"),
+  speech: $("speech"), speechRec: $("speechRec"), speechText: $("speechText"),
+  speechModel: $("speechModel"), speechLib: $("speechLib"), speechInfo: $("speechInfo"),
   saveLog: $("saveLog"), saveNow: $("saveNow"), saveInfo: $("saveInfo"),
   stats: $("stats"), bars: $("bars"),
 };
@@ -57,7 +57,7 @@ const state = {
   zoom: new ZoomTracker(),
   zoomRoi: null,     // region fed to the face detector next frame, null = full frame
   coach: null,       // SmileCoach while the voice coach is on
-  speech: null,      // SpeechRouter on the voice entry point, null on index.html
+  speech: null,      // Transcriber on the voice entry point, null on index.html
   speechListener: null,  // the Vosk listener, so the source switch can retarget its audio
   speechFailure: null,   // why it would not start, kept for the session JSON
   speechPhase: "idle",   // how far the start got: "never checked" and "hung at step N" look alike otherwise
@@ -280,9 +280,6 @@ function processFrame(src) {
     if (verdict) console.log(`[coach] ${verdict.kind}: "${verdict.text}" happy=${(verdict.frac * 100).toFixed(0)}%`
       + (verdict.prevFrac === null ? "" : ` (was ${(verdict.prevFrac * 100).toFixed(0)}%)`));
   }
-
-  // --- speech: the free window closes on silence or on its ceiling ---
-  state.speech?.tick(nowS);
 
   // --- session log: everything above, accumulated for the JSON on the Desktop ---
   if (!state.log) {
@@ -643,45 +640,32 @@ ui.coachTest.addEventListener("click", () => {
  * AudioContext may not be resumed before a gesture.
  */
 const SPEECH_KEY = "smile_detector.speech";
+const REC_KEY = "smile_detector.speechRec";
 let starting_ish = () => false;
+/**
+ * Speech, only on the voice entry point: `index.html` never imports the module,
+ * so the plain version is byte for byte the one that was there before.
+ *
+ * Two switches, and they mean different things. `speech` loads the model and
+ * opens the microphone, which costs seconds and a permission prompt, so it is
+ * done once. `recording` decides whether anything is decoded at all - it is
+ * the one a visitor flips, and it replaced the spoken commands, which had to
+ * be recognised before anything was being recorded and competed with the
+ * visitor's own words.
+ */
 async function initSpeech() {
-  const { SpeechRouter, COMMANDS, voskListener } = await import("./speech.js");
+  const { Transcriber, voskListener } = await import("./speech.js");
   const { ENCOURAGEMENTS, REPRIMANDS, STEADY } = await import("./coach.js");
   const setSpeechInfo = t => { if (ui.speechInfo) ui.speechInfo.textContent = t; };
 
-  state.speech = new SpeechRouter({
-    commands: COMMANDS,
-    freeMaxS: Math.max(2, parseFloat(ui.speechMax?.value) || 30),
-    freeSilenceS: Math.max(0.3, parseFloat(ui.speechSilence?.value) || 3),
-    freeLeadS: Math.max(0.5, parseFloat(ui.speechLead?.value) || 4),
+  state.speech = new Transcriber({
     coachPhrases: [...ENCOURAGEMENTS, ...REPRIMANDS, STEADY],
     nowS: performance.now() / 1000,
-    onCommand: c => {
-      state.log?.command(c, performance.now() / 1000);
-      console.log(`[speech] command: "${c.command}"`);
-      runCommand(c.command);
-      state.dirty = true;
-    },
-    onOpen: () => {
-      console.log("[speech] free window open, listening");
-      setSpeechInfo("listening: say something");
-      state.dirty = true;
-    },
-    onFree: seg => {
-      state.log?.freeSegment(seg, performance.now() / 1000);
-      console.log(`[speech] free (${seg.endedBy}, conf ${seg.conf ?? "?"}): "${seg.text}"`);
-      setSpeechInfo(`heard: "${seg.text}"`);
+    onText: text => {
+      if (ui.speechText) ui.speechText.textContent = text;
       state.dirty = true;
     },
   });
-
-  // Commands that map onto something the app already does. The rest of the
-  // list is recorded in the JSON and does nothing yet, on purpose.
-  function runCommand(cmd) {
-    const t = performance.now() / 1000;
-    if (cmd === "save session") saveSession("manual");
-    else if (cmd === "reset") { state.positive.reset(t); state.faceTime.reset(t); }
-  }
 
   /**
    * vosk-browser ships a UMD bundle, not an ES module: it installs a `Vosk`
@@ -703,12 +687,12 @@ async function initSpeech() {
     p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} within ${ms / 1000}s`)), ms)),
   ]);
 
-  let listener = null, starting = false, failure = null;
+  let listener = null, starting = false;
   starting_ish = () => starting;
   /**
-   * Every click retries this, so `starting` matters: without it a second click
-   * during the model load - 39 MB, seconds of it - would begin a second one,
-   * and the two would race.
+   * Every gesture retries this, so `starting` matters: without it a second one
+   * during the model load - 39 MB, seconds of it - would begin a second load
+   * racing the first.
    */
   async function startListening() {
     if (listener || starting || !ui.speech?.checked) {
@@ -726,7 +710,7 @@ async function initSpeech() {
       const l = await withTimeout(120000, "the model did not load", voskListener({
         vosk,
         modelUrl: ui.speechModel?.value || "vendor/vosk-model-small-en-us-0.15.tar.gz",
-        commands: COMMANDS, router: state.speech, element: video,
+        transcriber: state.speech, element: video,
         speaking: () => !!(window.speechSynthesis && window.speechSynthesis.speaking),
         onState: (s, d) => setSpeechInfo(d ? `${s}: ${d}` : s),
       }));
@@ -734,12 +718,13 @@ async function initSpeech() {
       await l.setSource(state.source?.kind || "webcam");
       listener = l;
       state.speechListener = l;
-      state.speechPhase = "listening";
-      failure = null;
+      state.speechPhase = "ready";
+      state.speechFailure = null;
+      syncRecording();                     // honour a recording switch left on
     } catch (e) {
       // the panel is easy to miss and the console is not always open: the
       // session file has to carry this too, or the failure leaves no trace
-      failure = `${e.name || "Error"}: ${e.message || e}`;
+      const failure = `${e.name || "Error"}: ${e.message || e}`;
       state.speechFailure = `failed while ${state.speechPhase}: ${failure}`;
       state.speechPhase = `failed while ${state.speechPhase}`;
       console.error("[speech] cannot start:", e);
@@ -748,25 +733,44 @@ async function initSpeech() {
       starting = false;
     }
   }
+
+  function syncRecording() {
+    const on = !!(ui.speechRec?.checked && listener);
+    state.speech.setRecording(on, performance.now() / 1000);
+    console.log(`[speech] recording ${on ? "on" : "off"}`);
+    if (on) setSpeechInfo("recording");
+    else if (listener) setSpeechInfo("ready, not recording");
+    state.dirty = true;
+  }
+
   // Any gesture will do to resume a suspended context, and this page is driven
   // as much by keys as by clicks: a kiosk may never see a click at all.
   for (const ev of ["click", "keydown"]) {
     document.addEventListener(ev, () => { startListening(); listener?.resume(); });
   }
+
   // A restored switch is a promise the page has to keep. Assigning .checked
-  // fires no change event, so persisting it left the box claiming to be on
-  // while nothing had started - the switch lied, and every session after it
-  // logged an empty transcript.
+  // fires no change event, so persisting it once left the box claiming to be
+  // on while nothing had started.
   try {
-    if (localStorage.getItem(SPEECH_KEY) === "1" && ui.speech) {
-      ui.speech.checked = true;
-      startListening();
-    }
+    if (localStorage.getItem(SPEECH_KEY) === "1" && ui.speech) ui.speech.checked = true;
+    if (localStorage.getItem(REC_KEY) === "1" && ui.speechRec) ui.speechRec.checked = true;
   } catch {}
+  if (ui.speech?.checked) startListening();
+
   ui.speech?.addEventListener("change", () => {
     try { localStorage.setItem(SPEECH_KEY, ui.speech.checked ? "1" : "0"); } catch {}
     if (ui.speech.checked) startListening();
-    else { listener?.stop(); listener = null; state.speechListener = null; }
+    else {
+      state.speech.setRecording(false, performance.now() / 1000);
+      listener?.stop(); listener = null; state.speechListener = null;
+      setSpeechInfo("switch speech on to start listening");
+    }
+  });
+  ui.speechRec?.addEventListener("change", () => {
+    try { localStorage.setItem(REC_KEY, ui.speechRec.checked ? "1" : "0"); } catch {}
+    startListening();                      // recording implies wanting to listen
+    syncRecording();
   });
   if (!ui.speech?.checked) setSpeechInfo("switch speech on to start listening");
 }
@@ -781,6 +785,11 @@ function sessionBody(reason) {
   // the recogniser's own account of the session, so a JSON with no transcript
   // still says which link of the chain broke
   if (state.log && state.speech) {
+    const nowS = performance.now() / 1000;
+    state.log.transcript({
+      text: state.speech.text(), words: state.speech.words(),
+      conf: state.speech.confidence(), recordedS: +state.speech.seconds(nowS).toFixed(2),
+    });
     state.log.speechStats({
       ...state.speech.stats,
       ...(state.speechListener?.stats || {
@@ -826,6 +835,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "r") { state.hands?.reset(performance.now() / 1000); state.dirty = true; }
   if (e.key === "t") { const t = performance.now() / 1000; state.positive.reset(t); state.faceTime.reset(t); state.dirty = true; }
   if (e.key === "c") { state.coach?.check(performance.now() / 1000); state.dirty = true; }
+  if (e.key === "v" && ui.speechRec) { ui.speechRec.checked = !ui.speechRec.checked; ui.speechRec.dispatchEvent(new Event("change")); }
   if (e.key === "f") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
 });
 

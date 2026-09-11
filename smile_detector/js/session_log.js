@@ -12,7 +12,7 @@
 
 /** Per-minute row of the timeline. */
 function newMinute(minute) {
-  return { minute, faceS: 0, smilingS: 0, blinks: 0, handsS: 0, commands: 0, words: 0 };
+  return { minute, faceS: 0, smilingS: 0, blinks: 0, handsS: 0 };
 }
 
 export class SessionLog {
@@ -31,7 +31,7 @@ export class SessionLog {
     this.prevPalms = null;
     this.prevRect = false;
     this.verdicts = [];
-    this.speech = { commands: [], free: [] };
+    this.speech = null;             // one transcript for the session, set at save time
     this.speechDiag = null;         // whatever the recogniser can say about itself
     this.timeline = [];
   }
@@ -87,30 +87,16 @@ export class SessionLog {
     });
   }
 
-  /** A command as recognized by the constrained-grammar layer. */
-  command(c, nowS) {
-    this.speech.commands.push({
-      atS: +(nowS - this.startS).toFixed(1), at: new Date(this.startedAt + (nowS - this.startS) * 1000).toISOString(),
-      command: c.command,
-    });
-    this.minuteRow(nowS).commands++;
-  }
-
   /**
-   * A free-speech window as it closed. `conf` is the mean confidence Vosk gave
-   * the window: the small model transcribes free speech roughly, and this is
-   * what lets a reader tell a plausible transcript from noise. `coachOverlap`
-   * marks a window the coach talked over, which no amount of text filtering
-   * can clean up.
+   * Everything the session heard, as one string. Speech is not cut into events:
+   * silence is a bad delimiter, so the recorder switch decides where a
+   * transcript begins and ends, and what comes out is one transcript.
+   * `conf` is the mean confidence Vosk gave it - the small model transcribes
+   * free speech roughly, and this is what lets a reader tell a plausible
+   * transcript from noise.
    */
-  freeSegment(seg, nowS) {
-    const words = seg.text ? seg.text.split(/\s+/).length : 0;
-    this.speech.free.push({
-      atS: +(seg.atS - this.startS).toFixed(1), at: new Date(this.startedAt + (seg.atS - this.startS) * 1000).toISOString(),
-      durationS: seg.durationS, text: seg.text, conf: seg.conf, words,
-      coachOverlap: seg.coachOverlap, endedBy: seg.endedBy, fromPartial: !!seg.fromPartial,
-    });
-    this.minuteRow(nowS).words += words;
+  transcript(t) {
+    this.speech = t || null;
   }
 
   /**
@@ -137,7 +123,7 @@ export class SessionLog {
     const counts = {};
     for (const v of this.verdicts) counts[v.kind] = (counts[v.kind] || 0) + 1;
     return {
-      app: "smile_detector", format: 2, reason,
+      app: "smile_detector", format: 3, reason,
       startedAt: new Date(this.startedAt).toISOString(),
       endedAt: new Date(this.startedAt + elapsedS * 1000).toISOString(),
       elapsedS: r(elapsedS), frames: this.frames,
@@ -159,15 +145,8 @@ export class SessionLog {
         travelFrameWidths: this.frameWidth > 0 ? r(this.hands.travelPx / this.frameWidth) : null,
       },
       coach: { verdicts: this.verdicts, counts },
-      speech: {
-        commands: this.speech.commands, free: this.speech.free,
-        counts: {
-          commands: this.speech.commands.length, freeSegments: this.speech.free.length,
-          words: this.speech.free.reduce((n, f) => n + f.words, 0),
-        },
-        diagnostics: this.speechDiag,
-      },
-      timeline: this.timeline.map(t => ({ minute: t.minute, faceS: r(t.faceS), smilingS: r(t.smilingS), blinks: t.blinks, handsS: r(t.handsS), commands: t.commands, words: t.words })),
+      speech: { ...(this.speech || { text: "", words: 0, conf: null, recordedS: 0 }), diagnostics: this.speechDiag },
+      timeline: this.timeline.map(t => ({ minute: t.minute, faceS: r(t.faceS), smilingS: r(t.smilingS), blinks: t.blinks, handsS: r(t.handsS) })),
     };
   }
 }

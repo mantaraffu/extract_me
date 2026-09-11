@@ -79,58 +79,31 @@ test("the file name carries the local start time", () => {
   assert.equal(name, "smile_session_2026-09-08_09-05-07.json");
 });
 
-test("speech: commands and free segments land in the JSON", () => {
+test("speech: the transcript is one string in the JSON", () => {
   const log = new SessionLog({ nowS: 0 });
   log.feed({ nowS: 0, label: "neutral" });
-  log.command({ command: "print" }, 5);
-  log.freeSegment({ text: "i came here with my sister", conf: 0.72, atS: 10,
-                    durationS: 4.2, coachOverlap: false, endedBy: "silence" }, 14.2);
+  log.transcript({ text: "i came here with my sister", words: 6, conf: 0.72, recordedS: 14.2 });
   const j = log.toJSON({ nowS: 20 });
-  assert.equal(j.format, 2);
-  assert.equal(j.speech.commands.length, 1);
-  assert.equal(j.speech.commands[0].command, "print");
-  assert.equal(j.speech.free[0].text, "i came here with my sister");
-  assert.equal(j.speech.free[0].words, 6);
-  assert.equal(j.speech.free[0].conf, 0.72);
-  assert.deepEqual(j.speech.counts, { commands: 1, freeSegments: 1, words: 6 });
+  assert.equal(j.format, 3);
+  assert.equal(j.speech.text, "i came here with my sister");
+  assert.equal(j.speech.words, 6);
+  assert.equal(j.speech.conf, 0.72);
+  assert.equal(j.speech.recordedS, 14.2);
 });
 
-test("speech: a contaminated segment is kept and flagged", () => {
-  const log = new SessionLog({ nowS: 0 });
-  log.freeSegment({ text: "it is funny", conf: 0.3, atS: 2, durationS: 1,
-                    coachOverlap: true, endedBy: "timeout" }, 3);
-  const j = log.toJSON({ nowS: 5 });
-  assert.equal(j.speech.free[0].coachOverlap, true);
-  assert.equal(j.speech.free[0].endedBy, "timeout");
-});
-
-test("speech: the timeline counts commands and words per minute", () => {
-  const log = new SessionLog({ nowS: 0 });
-  log.feed({ nowS: 0, label: "neutral" });
-  log.command({ command: "start" }, 10);
-  log.freeSegment({ text: "two words", conf: null, atS: 20, durationS: 1,
-                    coachOverlap: false, endedBy: "silence" }, 21);
-  log.command({ command: "stop" }, 70);        // second minute
-  const j = log.toJSON({ nowS: 130 });
-  assert.equal(j.timeline[0].commands, 1);
-  assert.equal(j.timeline[0].words, 2);
-  assert.equal(j.timeline[1].commands, 1);
-  assert.equal(j.timeline[1].words, 0);
-});
-
-test("speech: an empty session still carries the section", () => {
+test("speech: a session that heard nothing still carries the section", () => {
   const log = new SessionLog({ nowS: 0 });
   const j = log.toJSON({ nowS: 1 });
-  assert.deepEqual(j.speech.free, []);
-  assert.deepEqual(j.speech.counts, { commands: 0, freeSegments: 0, words: 0 });
+  assert.equal(j.speech.text, "");
+  assert.equal(j.speech.words, 0);
+  assert.equal(j.speech.conf, null);
 });
 
 test("speech diagnostics ride along in the JSON, null when never set", () => {
   const log = new SessionLog({ nowS: 0 });
   assert.equal(log.toJSON({ nowS: 1 }).speech.diagnostics, null);
-  log.speechStats({ finals: 3, unmatched: ["tell me the"], chunks: 900, rms: 0.21 });
+  log.speechStats({ finals: 3, chunks: 900, rms: 0.21 });
   const j = log.toJSON({ nowS: 2 });
   assert.equal(j.speech.diagnostics.finals, 3);
   assert.equal(j.speech.diagnostics.chunks, 900);
-  assert.deepEqual(j.speech.diagnostics.unmatched, ["tell me the"]);
 });

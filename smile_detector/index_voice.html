@@ -69,20 +69,17 @@
   </fieldset>
 
   <fieldset>
-    <legend><label><input id="speech" type="checkbox"> speech (Vosk, offline)</label></legend>
-    <p class="hint">a closed list of commands (<code>save session</code>, <code>reset</code>,
-    <code>tell me</code>) recognised through a Vosk grammar: anything outside the list decodes to
-    <code>[unk]</code> and is ignored. <code>tell me</code> opens a free window where everything said
-    is transcribed, and which closes by itself.</p>
-    <label>free window: <input id="speechLead" type="number" step="0.5" min="0.5" value="4"> s to start talking,
-    then closes after <input id="speechSilence" type="number" step="0.1" min="0.3" value="3"> s of silence</label>
-    <label>and lasts at most <input id="speechMax" type="number" step="1" min="2" value="30"> s</label>
-    <label>model <input id="speechModel" type="text" value="vendor/vosk-model-small-en-us-0.15.tar.gz"></label>
-    <label>library <input id="speechLib" type="text" value="vendor/vosk-browser.js"></label>
+    <legend><label><input id="speech" type="checkbox"> speech to text (Vosk, offline)</label></legend>
+    <p class="hint">loads the model and opens the microphone. Nothing is decoded until you start
+    recording below, and nothing ever leaves this machine.</p>
+    <label><input id="speechRec" type="checkbox"> <b>recording</b> — everything said goes into one transcript</label>
     <p class="hint">the audio follows the source: the microphone with the webcam, the file itself
     when a video is loaded. Recognition runs at 16 kHz, so a loaded video plays back dull - it is a
     test source, not something to listen to.</p>
+    <label>model <input id="speechModel" type="text" value="vendor/vosk-model-small-en-us-0.15.tar.gz"></label>
+    <label>library <input id="speechLib" type="text" value="vendor/vosk-browser.js"></label>
     <p class="hint" id="speechInfo"></p>
+    <pre id="speechText"></pre>
   </fieldset>
 
   <fieldset>
@@ -97,7 +94,7 @@
   <pre id="stats"></pre>
   <div id="bars"></div>
 
-  <p class="hint">keys: <b>h</b> panel · <b>o</b> overlay · <b>m</b> mirror · <b>f</b> fullscreen · <b>r</b> reset rect · <b>t</b> reset stopwatch and % happy · <b>c</b> coach verdict now · <b>s</b> save session<br>
+  <p class="hint">keys: <b>h</b> panel · <b>o</b> overlay · <b>m</b> mirror · <b>f</b> fullscreen · <b>r</b> reset rect · <b>t</b> reset stopwatch and % happy · <b>c</b> coach verdict now · <b>s</b> save session · <b>v</b> recording on/off<br>
   drag a video or an image onto the page to use it as the source.<br>
   per-frame state in <code>window.emotionState</code> and the <code>emotionscript</code> event.</p>
 </aside>

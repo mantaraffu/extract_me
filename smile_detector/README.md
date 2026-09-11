@@ -49,7 +49,8 @@ Sources other than the webcam:
   (handy for testing without a camera; `test.jpg` is git-ignored).
 
 Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
-`t` reset stopwatch, `c` coach verdict now, `s` save the session JSON.
+`t` reset stopwatch, `v` recording on/off, `c` coach verdict now, `s` save the
+session JSON.
 
 ## What it does
 - **Face**: FaceLandmarker (478 points + 52 blendshapes) in VIDEO mode with
@@ -109,46 +110,41 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   being read, so an empty room neither adds nor subtracts, and the share is a
   live ratio of the two stopwatches rather than a third accumulator. `t`
   resets both. In the published state: `elapsed`, `faceTime`, `pctPositive`.
-- **Speech** (`index_voice.html` only, off by default): Vosk through
+- **Speech to text** (`index_voice.html` only, off by default): Vosk through
   vosk-browser, entirely offline - the model is served from `vendor/`, no audio
-  and no request leaves the machine. A closed list of commands (`COMMANDS` at
-  the top of `speech.js`) becomes a Vosk grammar, which keeps the recogniser
-  small and accurate; anything outside it decodes to `[unk]`, which is in the
-  grammar precisely so stray audio is not forced onto the nearest command.
-  `tell me` opens a free window where a full-vocabulary recogniser transcribes
-  everything said. The window cannot close on a spoken command - in free mode
-  "stop" is just a word, and a visitor saying it mid-sentence would cut
-  themselves off - so silence closes it, though not the first final result,
-  since Vosk emits one at every pause and a mid-thought breath would truncate
-  the answer: it stays open until nothing new has arrived for 3 s, with 30 s
-  as the ceiling. That silence has to allow for a thinking pause mid-sentence,
-  not merely the gap between words: at 1.5 s it shut on people who were still
-  talking, and since the audio then goes back to the command recogniser, which
-  drops everything outside its grammar, the rest of what they said vanished and
-  the whole thing looked like it had stopped after one answer. A command heard
-  short of its full phrase - "save" for "save session", which is what Vosk
-  usually returns - counts as that command when the prefix is unambiguous. Silence before the visitor has started is not the same thing
-  as silence after they finished: they get 4 s to begin, and only once something
-  has been said does the 1.5 s rule take over - otherwise anyone who paused to
-  think lost their window. The tail of the opening command ("me", of "tell me")
-  is still in the audio the free recogniser receives, since the switch happens
-  on that command's own final result, so a first result that merely echoes the
-  command is dropped rather than becoming the transcript. The coach is handled twice over: in command mode its lines are
-  not in the grammar, and in free mode a line matching a known coach phrase is
-  dropped while a window it talked over is flagged `coachOverlap` rather than
-  silently trusted - speech that merely *overlaps* the coach cannot be cleaned
-  up textually at all, which is why `echoCancellation` is on. Audio follows the
-  picture: the microphone with the webcam, the file itself when a video is
-  loaded. Recognition runs at 16 kHz, so a loaded video plays back dull; it is a
-  test source, not something an audience listens to.
+  and no request leaves the machine. Two switches, meaning different things.
+  *speech* loads the model and opens the microphone, which costs seconds and a
+  permission prompt, so it happens once. *recording* decides whether anything is
+  decoded at all: nothing is fed to the recogniser while it is off, so nothing
+  said in the room while nobody asked to be recorded is ever transcribed. `v`
+  toggles it.
+  There are no spoken commands. A phrase that starts and stops recording has to
+  be recognised *before* anything is being recorded, which is the least reliable
+  moment there is, and it competes with the visitor's own words - a half-decoded
+  "save session" arrives as "save". A checkbox does the same job and cannot be
+  misheard. With the commands went the constrained grammar they needed, so one
+  full-vocabulary recogniser is all that remains.
+  Nor is the transcript cut into pieces. Silence is a bad delimiter for speech:
+  a pause to think looks exactly like the end of an answer, and every threshold
+  that tried to tell them apart truncated somebody mid-sentence. A session
+  produces **one string**, and the switch decides where it begins and ends;
+  switching off and on again appends rather than starting over. Vosk finalises
+  on its own endpointing, which lags, so the last thing said is routinely still
+  unfinalised when recording stops: the trailing partial is kept and joined on.
+  Coach lines are dropped when they match a known phrase; speech that merely
+  overlaps the coach cannot be cleaned up textually at all and is counted
+  instead, which is why `echoCancellation` is on. Audio follows the picture: the
+  microphone with the webcam, the file itself when a video is loaded, at 16 kHz
+  - so a loaded video plays back dull, being a test source rather than something
+  an audience listens to.
 - **Session JSON on the Desktop**: everything the session measured, written
   to `~/Desktop/smile_session_<start time>.json` when the page closes (close,
   reload or navigation away, via `sendBeacon`), every 30 s as a safety net,
   and on demand with the panel button or `s`. One file per session, kept up
   to date. It holds: elapsed time, seconds with and without a face, seconds
   smiling and not smiling with the share of face time, seconds per emotion
-  label with mean valence and arousal, blink count and rate, recognised
-  commands and free transcripts with their mean confidence, hands (seconds
+  label with mean valence and arousal, blink count and rate, the session's
+  transcript with its word count and mean confidence, hands (seconds
   with one and two hands, seconds with the rect up and how many times it
   appeared, total palm travel in pixels and in frame widths), every coach
   verdict with its instant and shares, and a per-minute timeline of face,

@@ -1,328 +1,156 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SpeechRouter, COMMANDS, OPEN_FREE, UNK, grammar, normalize } from "../js/speech.js";
+import { Transcriber, UNK, normalize, stripUnk } from "../js/speech.js";
 
-function routerWith(opts = {}) {
-  const commands = [], segments = [];
-  const r = new SpeechRouter({
-    onCommand: c => commands.push(c), onFree: s => segments.push(s), nowS: 0, ...opts,
-  });
-  return { r, commands, segments };
+function make(opts = {}) {
+  const seen = [];
+  const t = new Transcriber({ onText: s => seen.push(s), nowS: 0, ...opts });
+  return { t, seen };
 }
 
 /** A final result, the shape the adapter feeds in. */
-function say(r, text, nowS, extra = {}) {
-  return r.result({ text, final: true, nowS, ...extra });
+function say(t, text, nowS = 0, extra = {}) {
+  return t.result({ text, final: true, nowS, ...extra });
 }
-
-test("grammar is the commands plus the unknown token", () => {
-  assert.deepEqual(grammar(["Start", "Tell me!"]), ["start", "tell me", UNK]);
-  assert.ok(grammar().includes(UNK));
-});
 
 test("normalize drops punctuation and collapses spaces", () => {
   assert.equal(normalize("  Tell   me, please! "), "tell me please");
   assert.equal(normalize(null), "");
 });
 
-test("a word in the grammar is a command", () => {
-  const { r, commands } = routerWith();
-  const v = say(r, "save session", 5);
-  assert.equal(v.kind, "command");
-  assert.equal(v.command, "save session");
-  assert.deepEqual(commands.map(c => c.command), ["save session"]);
-});
-
-test("unknown audio and words outside the grammar are dropped", () => {
-  const { r, commands } = routerWith();
-  assert.equal(say(r, UNK, 1), null);
-  assert.equal(say(r, "banana", 2), null);
-  assert.equal(say(r, "", 3), null);
-  assert.deepEqual(commands, []);
-});
-
-test("partial results never produce a command", () => {
-  const { r, commands } = routerWith();
-  assert.equal(r.result({ text: "reset", final: false, nowS: 1 }), null);
-  assert.deepEqual(commands, []);
-});
-
-test("the opening command switches to free mode and is not itself a command", () => {
-  const { r, commands } = routerWith();
-  assert.equal(say(r, OPEN_FREE, 10), null);
-  assert.equal(r.mode, "free");
-  assert.deepEqual(commands, []);
-});
-
-test("free window: pauses do not truncate, silence closes it", () => {
-  const { r, segments } = routerWith({ freeSilenceS: 1.5 });
-  say(r, OPEN_FREE, 0);
-  say(r, "i came here", 1);
-  assert.equal(r.tick(2.0), null);            // 1.0 s of quiet: still open
-  say(r, "with my sister", 2.4);              // the pause was mid-thought
-  assert.equal(r.tick(3.5), null);
-  const seg = r.tick(4.0);                    // 1.6 s since the last words
-  assert.equal(seg.text, "i came here with my sister");
-  assert.equal(seg.endedBy, "silence");
-  assert.equal(r.mode, "command");
-  assert.equal(segments.length, 1);
-});
-
-test("free window: the hard ceiling closes it on whoever never stops", () => {
-  const { r, segments } = routerWith({ freeMaxS: 5, freeSilenceS: 1.5 });
-  say(r, OPEN_FREE, 0);
-  for (let t = 1; t <= 5; t++) say(r, "and another thing", t);
-  const seg = r.tick(5.1);
-  assert.equal(seg.endedBy, "timeout");
-  assert.equal(segments.length, 1);
-  assert.ok(seg.durationS >= 5);
-});
-
-test("an empty window closes without producing a segment", () => {
-  const { r, segments } = routerWith({ freeSilenceS: 1, freeLeadS: 1 });
-  say(r, OPEN_FREE, 0);
-  assert.equal(r.tick(1.5), null);       // the lead-in ran out with nothing said
-  assert.equal(r.mode, "command");
-  assert.deepEqual(segments, []);
-});
-
-test("commands work again after the window closed", () => {
-  const { r, commands } = routerWith({ freeSilenceS: 1 });
-  say(r, OPEN_FREE, 0);
-  say(r, "something", 0.5);
-  r.tick(2);
-  say(r, "reset", 3);
-  assert.deepEqual(commands.map(c => c.command), ["reset"]);
-});
-
-test("a coach phrase said verbatim in the free window is dropped", () => {
-  const { r, segments } = routerWith({ coachPhrases: ["smile more please"], freeSilenceS: 1 });
-  say(r, OPEN_FREE, 0);
-  say(r, "Smile more, please!", 0.5);
-  assert.equal(r.tick(2), null);
-  assert.deepEqual(segments, []);
-});
-
-test("speech overlapping the coach is kept but flagged", () => {
-  const { r } = routerWith({ freeSilenceS: 1 });
-  say(r, OPEN_FREE, 0);
-  say(r, "i think it is funny", 0.5, { speaking: true });
-  const seg = r.tick(2);
-  assert.equal(seg.coachOverlap, true);
-  assert.equal(seg.text, "i think it is funny");
-});
-
-test("confidence is averaged over the window", () => {
-  const { r } = routerWith({ freeSilenceS: 1 });
-  say(r, OPEN_FREE, 0);
-  say(r, "one", 0.2, { conf: 0.9 });
-  say(r, "two", 0.4, { conf: 0.7 });
-  const seg = r.tick(2);
-  assert.equal(seg.conf, 0.8);
-});
-
-test("freeLeftS counts down, and is null in command mode", () => {
-  const { r } = routerWith({ freeMaxS: 20, freeSilenceS: 2, freeLeadS: 2 });
-  assert.equal(r.freeLeftS(0), null);
-  say(r, OPEN_FREE, 0);
-  assert.equal(r.freeLeftS(0.5), 1.5);        // the lead-in is the nearer deadline
-});
-
-test("reset drops an open window", () => {
-  const { r, segments } = routerWith();
-  say(r, OPEN_FREE, 0);
-  say(r, "half a sentence", 0.5);
-  r.reset(1);
-  assert.equal(r.mode, "command");
-  assert.equal(r.tick(10), null);
-  assert.deepEqual(segments, []);
-});
-
-test("COMMANDS contains the opening command", () => {
-  assert.ok(COMMANDS.map(normalize).includes(normalize(OPEN_FREE)));
-});
-
-test("the tail of the opening command does not become the transcript", () => {
-  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
-  say(r, OPEN_FREE, 0);
-  say(r, "me", 0.1);                     // the "me" of "tell me", still in the audio
-  assert.deepEqual(r.parts, []);
-  say(r, "i came here with my sister", 1.0);
-  const seg = r.tick(2.6);
-  assert.equal(seg.text, "i came here with my sister");
-  assert.equal(segments.length, 1);
-});
-
-test("the whole opening command echoed back is dropped too", () => {
-  const { r } = routerWith({ freeLeadS: 4 });
-  say(r, OPEN_FREE, 0);
-  say(r, "tell me", 0.1);
-  assert.deepEqual(r.parts, []);
-});
-
-test("an echo is only dropped first: the same word later is real speech", () => {
-  const { r } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
-  say(r, OPEN_FREE, 0);
-  say(r, "it was funny", 0.5);
-  say(r, "me", 1.0);                     // now it is something the visitor said
-  const seg = r.tick(2.6);
-  assert.equal(seg.text, "it was funny me");
-});
-
-test("a visitor who pauses to think keeps the window", () => {
-  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
-  say(r, OPEN_FREE, 0);
-  assert.equal(r.tick(2), null);         // 2 s of thinking: the old rule closed here
-  assert.equal(r.tick(3.5), null);
-  say(r, "i think it was strange", 3.8);
-  const seg = r.tick(5.4);
-  assert.equal(seg.text, "i think it was strange");
-  assert.equal(segments.length, 1);
-});
-
-test("but a window nobody ever speaks into still closes on the lead-in", () => {
-  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
-  say(r, OPEN_FREE, 0);
-  assert.equal(r.tick(3.9), null);
-  assert.equal(r.tick(4.1), null);       // closed, but empty: no segment
-  assert.equal(r.mode, "command");
-  assert.deepEqual(segments, []);
-});
-
-test("once speech started, the shorter silence rule takes over again", () => {
-  const { r } = routerWith({ freeSilenceS: 1.5, freeLeadS: 10 });
-  say(r, OPEN_FREE, 0);
-  say(r, "done", 0.5);
-  assert.equal(r.tick(1.5), null);
-  const seg = r.tick(2.1);               // 1.6 s after the words, not the 10 s lead
-  assert.equal(seg.text, "done");
-});
-
-test("freeLeftS counts the lead-in before anything is said", () => {
-  const { r } = routerWith({ freeMaxS: 20, freeSilenceS: 1.5, freeLeadS: 4 });
-  say(r, OPEN_FREE, 0);
-  assert.equal(r.freeLeftS(1), 3);       // the lead, not the 1.5 s silence
-  say(r, "hello", 1);
-  assert.equal(r.freeLeftS(1.5), 1);     // now the silence rule
-});
-
-test("partials keep a long sentence alive: Vosk only finalises at a pause", () => {
-  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
-  say(r, OPEN_FREE, 0);
-  // one long utterance: nothing but partials until the speaker stops
-  for (let t = 1; t <= 8; t++) r.result({ text: "i came here with my", final: false, nowS: t });
-  assert.equal(r.tick(8.1), null, "closed in the middle of the sentence");
-  say(r, "i came here with my sister", 8.5);
-  const seg = r.tick(10.1);
-  assert.equal(seg.text, "i came here with my sister");
-  assert.equal(segments.length, 1);
-});
-
-test("a partial that is only the command echo does not start the clock", () => {
-  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 2 });
-  say(r, OPEN_FREE, 0);
-  r.result({ text: "me", final: false, nowS: 0.1 });
-  assert.equal(r.heard, false);
-  assert.equal(r.tick(2.1), null);       // still closes on the lead-in
-  assert.deepEqual(segments, []);
-});
-
 test("normalize strips the brackets off [unk], so UNK is never matched directly", () => {
   assert.equal(normalize(UNK), "unk");
-  assert.notEqual(normalize(UNK), UNK);        // the comparison that silently never fired
+  assert.notEqual(normalize(UNK), UNK);
 });
 
-test("an out-of-vocabulary result is dropped, not counted as speech", () => {
-  const { r, commands, segments } = routerWith({ freeLeadS: 2 });
-  assert.equal(say(r, "[unk]", 1), null);
-  assert.equal(say(r, "[unk] [unk]", 2), null);
-  assert.deepEqual(commands, []);
-  assert.deepEqual(segments, []);
-  assert.equal(r.stats.unknown, 2);
+test("stripUnk removes markers wherever they sit", () => {
+  assert.equal(stripUnk("i came unk here"), "i came here");
+  assert.equal(stripUnk("unk unk"), "");
 });
 
-test("inline [unk] markers are stripped out of a transcript", () => {
-  const { r } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
-  say(r, OPEN_FREE, 0);
-  say(r, "i came [unk] here with [unk] my sister", 1);
-  const seg = r.tick(2.6);
-  assert.equal(seg.text, "i came here with my sister");
+test("nothing is recorded while the switch is off", () => {
+  const { t, seen } = make();
+  assert.equal(say(t, "i said something", 1), null);
+  assert.equal(t.text(), "");
+  assert.deepEqual(seen, []);
 });
 
-test("a free result of nothing but markers does not start the clock", () => {
-  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 2 });
-  say(r, OPEN_FREE, 0);
-  say(r, "[unk] [unk]", 0.5);
-  assert.equal(r.heard, false);
-  assert.equal(r.tick(2.1), null);
-  assert.deepEqual(segments, []);
+test("the switch starts it, and everything said lands in one string", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  say(t, "first sentence", 1);
+  say(t, "second sentence", 2);
+  say(t, "third sentence", 3);
+  assert.equal(t.text(), "first sentence second sentence third sentence");
+  assert.equal(t.words(), 6);
 });
 
-test("a window that shuts before Vosk finalises still keeps what it heard", () => {
-  const { r, segments } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
-  say(r, OPEN_FREE, 0);
-  // the whole sentence arrives as partials; the final never comes
-  r.result({ text: "i came", final: false, nowS: 1 });
-  r.result({ text: "i came here with", final: false, nowS: 1.5 });
-  r.result({ text: "i came here with my sister", final: false, nowS: 2 });
-  const seg = r.tick(3.6);
-  assert.equal(seg.text, "i came here with my sister");
-  assert.equal(seg.fromPartial, true);
-  assert.equal(segments.length, 1);
+test("a pause of any length does not end anything", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  say(t, "i think", 1);
+  say(t, "it was strange", 400);        // six and a half minutes later
+  assert.equal(t.text(), "i think it was strange");
 });
 
-test("a finalised utterance drops its partial instead of repeating it", () => {
-  const { r } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
-  say(r, OPEN_FREE, 0);
-  r.result({ text: "i came here", final: false, nowS: 1 });
-  say(r, "i came here", 1.5);             // same words, now final
-  const seg = r.tick(3.1);
-  assert.equal(seg.text, "i came here");  // not "i came here i came here"
-  assert.equal(seg.fromPartial, false);
+test("stopping folds in what Vosk had not finalised yet", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  say(t, "i came here", 1);
+  t.result({ text: "with my sister", final: false, nowS: 2 });
+  t.setRecording(false, 3);
+  assert.equal(t.text(), "i came here with my sister");
 });
 
-test("finalised sentences and a trailing unfinalised one are joined", () => {
-  const { r } = routerWith({ freeSilenceS: 1.5, freeLeadS: 4 });
-  say(r, OPEN_FREE, 0);
-  say(r, "first sentence", 1);
-  r.result({ text: "and then some more", final: false, nowS: 2 });
-  const seg = r.tick(3.6);
-  assert.equal(seg.text, "first sentence and then some more");
-  assert.equal(seg.fromPartial, true);
+test("a partial superseded by its final is not counted twice", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  t.result({ text: "i came here", final: false, nowS: 1 });
+  say(t, "i came here", 2);
+  assert.equal(t.text(), "i came here");
 });
 
-test("a command heard short of its full phrase still counts", () => {
-  const { r, commands } = routerWith();
-  say(r, "save", 1);                       // Vosk decoded only half of "save session"
-  assert.deepEqual(commands.map(c => c.command), ["save session"]);
+test("switching off and on again appends rather than starting over", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  say(t, "before the pause", 1);
+  t.setRecording(false, 2);
+  assert.equal(say(t, "not recorded", 3), null);
+  t.setRecording(true, 4);
+  say(t, "after the pause", 5);
+  assert.equal(t.text(), "before the pause after the pause");
 });
 
-test("a half-heard opening command still opens the window", () => {
-  const { r } = routerWith();
-  say(r, "tell", 1);
-  assert.equal(r.mode, "free");
+test("recorded seconds accumulate across switch-offs", () => {
+  const { t } = make();
+  t.setRecording(true, 10);
+  t.setRecording(false, 25);
+  t.setRecording(true, 100);
+  assert.equal(t.seconds(110), 25);        // 15 + 10 so far
+  t.setRecording(false, 130);
+  assert.equal(t.seconds(500), 45);
 });
 
-test("an ambiguous prefix matches nothing", () => {
-  const { r, commands } = routerWith({ commands: ["save session", "save frame"] });
-  assert.equal(say(r, "save", 1), null);
-  assert.deepEqual(commands, []);
-  assert.deepEqual(r.stats.unmatched, ["save"]);
+test("out-of-vocabulary markers never reach the transcript", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  say(t, "i came [unk] here", 1);
+  say(t, "[unk] [unk]", 2);
+  assert.equal(t.text(), "i came here");
+  assert.equal(t.stats.unknown, 2);
 });
 
-test("a prefix of nothing is still unmatched", () => {
-  const { r, commands } = routerWith();
-  assert.equal(say(r, "banana", 1), null);
-  assert.deepEqual(commands, []);
+test("a coach line said verbatim is dropped, and counted", () => {
+  const { t } = make({ coachPhrases: ["smile more please"] });
+  t.setRecording(true, 0);
+  say(t, "i was saying", 1);
+  say(t, "Smile more, please!", 2);
+  say(t, "something else", 3);
+  assert.equal(t.text(), "i was saying something else");
+  assert.equal(t.stats.coachDropped, 1);
 });
 
-test("a thinking pause mid-sentence no longer closes the window", () => {
-  const { r, segments } = routerWith();          // defaults: 3 s of silence
-  say(r, OPEN_FREE, 0);
-  say(r, "i think", 1);
-  assert.equal(r.tick(3.0), null);               // a 2 s pause: the old 1.5 s shut here
-  say(r, "it was strange", 3.2);
-  const seg = r.tick(6.3);
-  assert.equal(seg.text, "i think it was strange");
-  assert.equal(segments.length, 1);
+test("speech overlapping the coach is kept, and counted", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  say(t, "i think it is funny", 1, { speaking: true });
+  assert.equal(t.text(), "i think it is funny");
+  assert.equal(t.stats.coachOverlaps, 1);
+});
+
+test("confidence is averaged over the finalised utterances", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  assert.equal(t.confidence(), null);
+  say(t, "one", 1, { conf: 0.9 });
+  say(t, "two", 2, { conf: 0.7 });
+  assert.equal(t.confidence(), 0.8);
+});
+
+test("onText fires as the transcript grows and when recording stops", () => {
+  const { t, seen } = make();
+  t.setRecording(true, 0);
+  say(t, "one", 1);
+  say(t, "two", 2);
+  t.setRecording(false, 3);
+  assert.deepEqual(seen, ["", "one", "one two", "one two"]);
+});
+
+test("flipping the switch to where it already is changes nothing", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  say(t, "hello", 1);
+  t.setRecording(true, 2);
+  assert.equal(t.text(), "hello");
+  assert.equal(t.seconds(10), 10);
+});
+
+test("reset empties the transcript but keeps the session counters", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  say(t, "something", 1);
+  t.reset(2);
+  assert.equal(t.text(), "");
+  assert.equal(t.recording, false);
+  assert.equal(t.stats.finals, 1);
 });
