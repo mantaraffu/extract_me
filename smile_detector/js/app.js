@@ -15,6 +15,24 @@ import { ZoomTracker } from "./zoom.js";
 import { SmileCoach, browserSpeaker } from "./coach.js";
 import { SessionLog, sessionFileName, transcriptFileName } from "./session_log.js";
 
+/**
+ * A failure before the page finishes starting leaves a black canvas and nothing
+ * else: the keys are bound at the end of this module, so an exception on the
+ * way there takes the panel with it and the screen simply stops responding.
+ * Anything thrown from here on is written where it can be read without the
+ * console, since on an installation nobody has one open.
+ */
+function showFatal(what, err) {
+  const msg = `${what}: ${err?.message || err}`;
+  console.error(`[fatal] ${msg}`, err);
+  const el = document.getElementById("status");
+  if (el) { el.textContent = msg; el.style.color = "#f66"; }
+  const panel = document.getElementById("panel");
+  if (panel) panel.hidden = false;          // it may have been hidden, or never bound
+}
+window.addEventListener("error", e => showFatal("error", e.error || e.message));
+window.addEventListener("unhandledrejection", e => showFatal("failed", e.reason));
+
 /** The emotion labels that make the positive-time stopwatch run. */
 const POSITIVE_LABELS = new Set(["happy"]);
 
