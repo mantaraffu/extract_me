@@ -13,7 +13,7 @@ import { expressionsFromBlendshapes, LABELS } from "./expressions.js";
 import { PositiveTimer, formatDuration } from "./positive_timer.js";
 import { ZoomTracker } from "./zoom.js";
 import { SmileCoach, browserSpeaker } from "./coach.js";
-import { SessionLog, sessionFileName } from "./session_log.js";
+import { SessionLog, sessionFileName, transcriptFileName } from "./session_log.js";
 
 /** The emotion labels that make the positive-time stopwatch run. */
 const POSITIVE_LABELS = new Set(["happy"]);
@@ -65,6 +65,7 @@ const state = {
   blockedText: null, // a line the browser refused to speak, retried on the next click
   log: null,         // SessionLog, created with the first frame so it knows the frame width
   logFile: null,     // file name of this session on the Desktop
+  transcriptFile: null,  // and of the file holding what it heard, written beside it
   vit: null,
   vitPreds: null,
   frame: 0,
@@ -285,6 +286,7 @@ function processFrame(src) {
   if (!state.log) {
     state.log = new SessionLog({ startedAt: Date.now(), nowS, frameWidth: W });
     state.logFile = sessionFileName(state.log.startedAt);
+    state.transcriptFile = transcriptFileName(state.log.startedAt);
   }
   state.log.feed({
     nowS, label: preds ? preds[0].label : null, positive,
@@ -789,6 +791,7 @@ function sessionBody(reason) {
     state.log.transcript({
       text: state.speech.text(), words: state.speech.words(),
       conf: state.speech.confidence(), recordedS: +state.speech.seconds(nowS).toFixed(2),
+      file: state.transcriptFile, sessionFile: state.logFile,
     });
     state.log.speechStats({
       ...state.speech.stats,
@@ -801,13 +804,15 @@ function sessionBody(reason) {
   }
   return JSON.stringify(state.log.toJSON({ nowS: performance.now() / 1000, reason }), null, 2);
 }
-function saveSession(reason) {
-  if (!state.log || !ui.saveLog.checked) return;
-  const url = `save?name=${encodeURIComponent(state.logFile)}`;
-  const body = new Blob([sessionBody(reason)], { type: "application/json" });
-  // sendBeacon caps the payload (~64 KB) and returns false rather than throwing.
-  // Only the free transcript can grow that far, but a silent loss of the final
-  // save is not a thing to find out about later: fall back to a keepalive fetch.
+/**
+ * Post one document to the local server. `sendBeacon` caps the payload
+ * (~64 KB) and returns false rather than throwing; only a transcript can grow
+ * that far, and a silent loss of the final save is not a thing to find out
+ * about later, so it falls back to a keepalive fetch.
+ */
+function postSave(name, text, reason, report) {
+  const url = `save?name=${encodeURIComponent(name)}`;
+  const body = new Blob([text], { type: "application/json" });
   if (reason === "close") {
     if (!navigator.sendBeacon(url, body)) fetch(url, { method: "POST", body, keepalive: true }).catch(() => {});
     return;
@@ -816,9 +821,24 @@ function saveSession(reason) {
     .then(async r => {
       if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
       const { path } = await r.json();
-      ui.saveInfo.textContent = `saved ${path} (${reason}, ${new Date().toLocaleTimeString()})`;
+      if (report) ui.saveInfo.textContent = `saved ${path} (${reason}, ${new Date().toLocaleTimeString()})`;
     })
-    .catch(e => { ui.saveInfo.textContent = `save failed: ${e.message}. Serve with serve.py (npm run serve).`; });
+    .catch(e => { if (report) ui.saveInfo.textContent = `save failed: ${e.message}. Serve with serve.py (npm run serve).`; });
+}
+
+/**
+ * A session writes two files: what it measured, and what it heard. They are
+ * kept apart because they are different kinds of record - read by different
+ * people, kept for different reasons, shared under different rules - and the
+ * transcript is written only when there is one, so a silent session leaves no
+ * empty file behind.
+ */
+function saveSession(reason) {
+  if (!state.log || !ui.saveLog.checked) return;
+  const body = sessionBody(reason);            // also folds the transcript into the log
+  postSave(state.logFile, body, reason, true);
+  const t = state.log.transcriptJSON({ nowS: performance.now() / 1000, reason });
+  if (t) postSave(state.transcriptFile, JSON.stringify(t, null, 2), reason, false);
 }
 setInterval(() => saveSession("autosave"), AUTOSAVE_S * 1000);
 window.addEventListener("pagehide", () => saveSession("close"));   // close, reload, navigation away

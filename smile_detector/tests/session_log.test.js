@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SessionLog, sessionFileName } from "../js/session_log.js";
+import { SessionLog, sessionFileName, transcriptFileName } from "../js/session_log.js";
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
 
@@ -79,31 +79,58 @@ test("the file name carries the local start time", () => {
   assert.equal(name, "smile_session_2026-09-08_09-05-07.json");
 });
 
-test("speech: the transcript is one string in the JSON", () => {
+test("speech: the session file carries a pointer, not the words", () => {
   const log = new SessionLog({ nowS: 0 });
   log.feed({ nowS: 0, label: "neutral" });
-  log.transcript({ text: "i came here with my sister", words: 6, conf: 0.72, recordedS: 14.2 });
+  log.transcript({
+    text: "i came here with my sister", words: 6, conf: 0.72, recordedS: 14.2,
+    file: "smile_transcript_x.json", sessionFile: "smile_session_x.json",
+  });
   const j = log.toJSON({ nowS: 20 });
   assert.equal(j.format, 3);
-  assert.equal(j.speech.text, "i came here with my sister");
+  assert.equal(j.speech.transcript, "smile_transcript_x.json");
   assert.equal(j.speech.words, 6);
-  assert.equal(j.speech.conf, 0.72);
-  assert.equal(j.speech.recordedS, 14.2);
+  assert.equal(JSON.stringify(j).includes("my sister"), false, "the words leaked into the session file");
 });
 
-test("speech: a session that heard nothing still carries the section", () => {
-  const log = new SessionLog({ nowS: 0 });
-  const j = log.toJSON({ nowS: 1 });
-  assert.equal(j.speech.text, "");
-  assert.equal(j.speech.words, 0);
-  assert.equal(j.speech.conf, null);
+test("speech: the transcript is its own document, pointing back", () => {
+  const log = new SessionLog({ startedAt: Date.UTC(2026, 0, 2, 3, 4, 5), nowS: 0 });
+  log.transcript({
+    text: "i came here", words: 3, conf: 0.5, recordedS: 4,
+    file: "smile_transcript_x.json", sessionFile: "smile_session_x.json",
+  });
+  log.speechStats({ finals: 2 });
+  const t = log.transcriptJSON({ nowS: 10, reason: "close" });
+  assert.equal(t.kind, "transcript");
+  assert.equal(t.text, "i came here");
+  assert.equal(t.words, 3);
+  assert.equal(t.recordedS, 4);
+  assert.equal(t.session, "smile_session_x.json");
+  assert.equal(t.reason, "close");
+  assert.equal(t.diagnostics.finals, 2);
 });
 
-test("speech diagnostics ride along in the JSON, null when never set", () => {
+test("speech: a silent session writes no transcript at all", () => {
   const log = new SessionLog({ nowS: 0 });
-  assert.equal(log.toJSON({ nowS: 1 }).speech.diagnostics, null);
-  log.speechStats({ finals: 3, chunks: 900, rms: 0.21 });
-  const j = log.toJSON({ nowS: 2 });
-  assert.equal(j.speech.diagnostics.finals, 3);
-  assert.equal(j.speech.diagnostics.chunks, 900);
+  assert.equal(log.transcriptJSON({ nowS: 1 }), null);
+  assert.equal(log.toJSON({ nowS: 1 }).speech, null);
+  log.transcript({ text: "", words: 0, conf: null, recordedS: 0, file: "f.json" });
+  assert.equal(log.transcriptJSON({ nowS: 1 }), null);
+  assert.equal(log.toJSON({ nowS: 1 }).speech, null);
+});
+
+test("the two files of one session share a timestamp", () => {
+  const at = Date.UTC(2026, 0, 2, 3, 4, 5);
+  const a = sessionFileName(at), b = transcriptFileName(at);
+  assert.match(a, /^smile_session_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.json$/);
+  assert.match(b, /^smile_transcript_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.json$/);
+  assert.equal(a.replace("session", "X"), b.replace("transcript", "X"));
+});
+
+test("speech diagnostics ride along with the transcript, not the session", () => {
+  const log = new SessionLog({ nowS: 0 });
+  log.speechStats({ finals: 3, chunks: 900 });
+  log.transcript({ text: "something", words: 1, conf: null, recordedS: 1, file: "f.json" });
+  assert.equal(log.transcriptJSON({ nowS: 2 }).diagnostics.chunks, 900);
+  assert.equal(log.toJSON({ nowS: 2 }).speech.diagnostics, undefined);
 });

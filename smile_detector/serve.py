@@ -17,7 +17,8 @@ import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-SAVE_NAME = re.compile(r"^smile_session_[A-Za-z0-9_-]+\.json$")
+# A session writes two files: what it measured, and what it heard.
+SAVE_NAME = re.compile(r"^smile_(session|transcript)_[A-Za-z0-9_-]+\.json$")
 WRITE_LOCK = threading.Lock()   # an autosave and the closing beacon must not interleave
 
 

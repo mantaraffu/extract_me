@@ -94,9 +94,34 @@ export class SessionLog {
    * `conf` is the mean confidence Vosk gave it - the small model transcribes
    * free speech roughly, and this is what lets a reader tell a plausible
    * transcript from noise.
+   *
+   * It does not go in the session file. What people said is a different kind of
+   * record from how long they smiled - read by different people, kept for
+   * different reasons, shared under different rules - so it is written beside
+   * it, and the session file carries only the name of the file holding it.
    */
   transcript(t) {
     this.speech = t || null;
+  }
+
+  /**
+   * The transcript as its own document, or null when nothing was recorded.
+   * `session` names the file this belongs to: the two are written at the same
+   * instant and share a timestamp, but a pointer beats a convention.
+   */
+  transcriptJSON({ nowS, reason = "manual" } = {}) {
+    const t = this.speech;
+    if (!t || !t.text) return null;
+    const elapsedS = nowS === undefined ? (this.last ?? this.startS) - this.startS : nowS - this.startS;
+    return {
+      app: "smile_detector", kind: "transcript", format: 1, reason,
+      session: t.sessionFile || null,
+      startedAt: new Date(this.startedAt).toISOString(),
+      endedAt: new Date(this.startedAt + elapsedS * 1000).toISOString(),
+      recordedS: t.recordedS, words: t.words, conf: t.conf,
+      text: t.text,
+      diagnostics: this.speechDiag,
+    };
   }
 
   /**
@@ -145,15 +170,27 @@ export class SessionLog {
         travelFrameWidths: this.frameWidth > 0 ? r(this.hands.travelPx / this.frameWidth) : null,
       },
       coach: { verdicts: this.verdicts, counts },
-      speech: { ...(this.speech || { text: "", words: 0, conf: null, recordedS: 0 }), diagnostics: this.speechDiag },
+      speech: this.speech?.text
+        ? { transcript: this.speech.file || null, words: this.speech.words, recordedS: this.speech.recordedS }
+        : null,
       timeline: this.timeline.map(t => ({ minute: t.minute, faceS: r(t.faceS), smilingS: r(t.smilingS), blinks: t.blinks, handsS: r(t.handsS) })),
     };
   }
 }
 
-/** File name for a session started at `startedAt` (ms): smile_session_YYYY-MM-DD_HH-MM-SS.json, local time. */
-export function sessionFileName(startedAt) {
+/** Timestamp shared by the files of one session: YYYY-MM-DD_HH-MM-SS, local time. */
+function stamp(startedAt) {
   const d = new Date(startedAt);
   const p = n => String(n).padStart(2, "0");
-  return `smile_session_${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}.json`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
+}
+
+/** File name for a session started at `startedAt` (ms). */
+export function sessionFileName(startedAt) {
+  return `smile_session_${stamp(startedAt)}.json`;
+}
+
+/** File name for that session's transcript, sharing its timestamp. */
+export function transcriptFileName(startedAt) {
+  return `smile_transcript_${stamp(startedAt)}.json`;
 }

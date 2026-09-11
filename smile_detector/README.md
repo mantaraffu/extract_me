@@ -135,7 +135,8 @@ session JSON.
   Nor is the transcript cut into pieces. Silence is a bad delimiter for speech:
   a pause to think looks exactly like the end of an answer, and every threshold
   that tried to tell them apart truncated somebody mid-sentence. A session
-  produces **one string**, and the switch decides where it begins and ends;
+  produces **one string**, written to its own file beside the session one, and
+  the switch decides where it begins and ends;
   switching off and on again appends rather than starting over. Vosk finalises
   on its own endpointing, which lags, so the last thing said is routinely still
   unfinalised when recording stops: the trailing partial is kept and joined on.
@@ -145,20 +146,26 @@ session JSON.
   microphone with the webcam, the file itself when a video is loaded, at 16 kHz
   - so a loaded video plays back dull, being a test source rather than something
   an audience listens to.
-- **Session JSON on the Desktop**: everything the session measured, written
+- **Two files on the Desktop**: a session writes what it measured and, beside
+  it, what it heard. They are kept apart because they are different kinds of
+  record - read by different people, kept for different reasons, shared under
+  different rules - and a silent session leaves no transcript file behind at
+  all. The two share a timestamp, and the session file names the transcript
+  rather than containing it.
+- **Session JSON**: everything the session measured, written
   to `~/Desktop/smile_session_<start time>.json` when the page closes (close,
   reload or navigation away, via `sendBeacon`), every 30 s as a safety net,
   and on demand with the panel button or `s`. One file per session, kept up
   to date. It holds: elapsed time, seconds with and without a face, seconds
   smiling and not smiling with the share of face time, seconds per emotion
-  label with mean valence and arousal, blink count and rate, the session's
-  transcript with its word count and mean confidence, hands (seconds
+  label with mean valence and arousal, blink count and rate, the name of the
+  transcript file with its word count, hands (seconds
   with one and two hands, seconds with the rect up and how many times it
   appeared, total palm travel in pixels and in frame widths), every coach
   verdict with its instant and shares, and a per-minute timeline of face,
   smiling, blinks and hands. The page cannot write files by itself, so the
-  bundled `serve.py` accepts `POST /save?name=smile_session_...json` and
-  writes it; another static server serves the app fine but saves nothing, and
+  bundled `serve.py` accepts `POST /save?name=smile_session_...json` (and
+  `smile_transcript_...json`) and writes it; another static server serves the app fine but saves nothing, and
   the panel says so. `SMILE_SAVE_DIR=/some/dir python3 serve.py` changes the
   folder.
 - **Distance**: the detector bundled in `face_landmarker.task` is BlazeFace
