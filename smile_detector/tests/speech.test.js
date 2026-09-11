@@ -228,3 +228,23 @@ test("partials contribute no words: only a final is confirmed", () => {
   t.result({ text: "hello", final: false, nowS: 1, words: [{ word: "hello", start: 0.1, end: 0.2, conf: 1 }] });
   assert.deepEqual(t.wordTimings(), []);
 });
+
+test("the ranking line is numbered, in order, space separated", async () => {
+  const { topLine } = await import("../js/speech.js");
+  assert.equal(topLine("my sister and my sister laughed the sister was happy and happy"),
+    "1: sister 2: happy 3: laughed");
+});
+
+test("the ranking line asks for three and settles for what there is", async () => {
+  const { topLine } = await import("../js/speech.js");
+  assert.equal(topLine("sister sister"), "1: sister");
+  assert.equal(topLine(""), "");
+  assert.equal(topLine("the and this that i was"), "");     // nothing but stop words
+});
+
+test("the transcriber offers its own ranking line", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  say(t, "the cat sat on the cat mat", 1);
+  assert.equal(t.topLine(3), "1: cat 2: mat 3: sat");
+});

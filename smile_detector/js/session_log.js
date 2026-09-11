@@ -123,6 +123,8 @@ export class SessionLog {
       top: t.top || [],
       timings: t.timings || [],
       diagnostics: this.speechDiag,
+      // last, where a reader ends up: the three words this session was about
+      top3: t.top3 || "",
     };
   }
 

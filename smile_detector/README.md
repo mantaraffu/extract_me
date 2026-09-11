@@ -149,10 +149,13 @@ session JSON.
   the two clocks. Word-level confidence is the useful one - a session-wide
   average of 0.82 sat on a largely wrong transcript, while per word it says
   which parts to trust - and the instants line speech up against the smiling and
-  blinking already on that timeline. And a **ranking of the five most frequent
+  blinking already on that timeline. And a **ranking of the most frequent
   meaningful words**, with stop words and demonstratives removed: the list lives
   at the top of `speech.js` and is meant to be edited, since what counts as
-  noise depends on what the installation is asking people.
+  noise depends on what the installation is asking people. It appears twice, for
+  two readers: `top` as five entries with their counts, and `top3` as one line -
+  `1: sister 2: happy 3: laughed` - written last in the file, where a person
+  ends up.
   Coach lines are dropped when they match a known phrase; speech that merely
   overlaps the coach cannot be cleaned up textually at all and is counted
   instead, which is why `echoCancellation` is on. Audio follows the picture: the

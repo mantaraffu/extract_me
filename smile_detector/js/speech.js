@@ -105,6 +105,15 @@ export function topWords(text, n = 5, stop = STOP_WORDS) {
     .map(([word, count]) => ({ word, count }));
 }
 
+/**
+ * The ranking as one line: "1: sister 2: happy 3: laughed". The array beside it
+ * is what a program reads; this is what a person reads, and it goes last in the
+ * file for the same reason a conclusion does.
+ */
+export function topLine(text, n = 3, stop = STOP_WORDS) {
+  return topWords(text, n, stop).map((t, i) => `${i + 1}: ${t.word}`).join(" ");
+}
+
 export class Transcriber {
   constructor({ coachPhrases = [], onText = null, nowS = 0 } = {}) {
     this.coachPhrases = new Set(coachPhrases.map(normalize));
@@ -215,6 +224,11 @@ export class Transcriber {
   /** The `n` most frequent meaningful words of the transcript. */
   top(n = 5) {
     return topWords(this.text(), n);
+  }
+
+  /** The same ranking as one readable line, "1: sister 2: happy 3: laughed". */
+  topLine(n = 3) {
+    return topLine(this.text(), n);
   }
 
   /** Mean confidence over the finalised utterances, null when there are none. */

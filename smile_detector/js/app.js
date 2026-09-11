@@ -800,7 +800,7 @@ function sessionBody(reason) {
     state.log.transcript({
       text: state.speech.text(), words: state.speech.words(),
       conf: state.speech.confidence(), recordedS: +state.speech.seconds(nowS).toFixed(2),
-      top: state.speech.top(5), timings: state.speech.wordTimings(),
+      top: state.speech.top(5), top3: state.speech.topLine(3), timings: state.speech.wordTimings(),
       file: state.transcriptFile, sessionFile: state.logFile,
     });
     state.log.speechStats({

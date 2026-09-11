@@ -134,3 +134,15 @@ test("speech diagnostics ride along with the transcript, not the session", () =>
   assert.equal(log.transcriptJSON({ nowS: 2 }).diagnostics.chunks, 900);
   assert.equal(log.toJSON({ nowS: 2 }).speech.diagnostics, undefined);
 });
+
+test("speech: the ranking line is the last thing in the transcript file", () => {
+  const log = new SessionLog({ nowS: 0 });
+  log.transcript({
+    text: "my sister laughed", words: 3, conf: 0.5, recordedS: 4,
+    top: [{ word: "sister", count: 1 }], top3: "1: sister 2: laughed",
+    file: "f.json", sessionFile: "s.json",
+  });
+  const t = log.transcriptJSON({ nowS: 10 });
+  assert.equal(t.top3, "1: sister 2: laughed");
+  assert.equal(Object.keys(t).at(-1), "top3", "the ranking has to come last");
+});
