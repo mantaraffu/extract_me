@@ -302,12 +302,6 @@ function processFrame(src) {
   const talkShare = state.speech ? state.speech.speakingShare(state.elapsed) : null;
   state.pctTalk = talkShare === null ? null : 100 * talkShare;
 
-  // --- talk coach: how much of the session was spent talking ---
-  if (state.talkCoach) {
-    const verdict = state.talkCoach.feed(talkShare, nowS);
-    if (verdict) console.log(`[talk] ${verdict.kind}: "${verdict.text}" talking=${(verdict.frac * 100).toFixed(1)}%`);
-  }
-
   // --- smile coach: happy time over face time, a spoken verdict when due ---
   if (state.coach) {
     // the reference is the session share above, so "was" is that number
@@ -316,6 +310,16 @@ function processFrame(src) {
     if (verdict) state.log?.verdict(verdict, nowS);
     if (verdict) console.log(`[coach] ${verdict.kind}: "${verdict.text}" happy=${(verdict.frac * 100).toFixed(0)}%`
       + (verdict.prevFrac === null ? "" : ` (was ${(verdict.prevFrac * 100).toFixed(0)}%)`));
+  }
+
+  // --- talk coach: how much of the session was spent talking ---
+  // After the smile coach on purpose. Both default to the same cadence, so they
+  // come due in the same frame; speaking cancels whatever is being said, and
+  // judged first this one would be cut off a syllable in, every time. Last, it
+  // sees the voice is taken and postpones.
+  if (state.talkCoach) {
+    const verdict = state.talkCoach.feed(talkShare, nowS);
+    if (verdict) console.log(`[talk] ${verdict.kind}: "${verdict.text}" talking=${(verdict.frac * 100).toFixed(1)}%`);
   }
 
   // --- session log: everything above, accumulated for the JSON on the Desktop ---
@@ -655,13 +659,20 @@ function loadCoachSettings() {
 
 /** Speech feedback in the status line; a blocked line is retried on the next click. */
 function onVoiceState(st, text, detail) {
-  if (st === "speaking") { state.blockedText = null; state.lastSpokeAtS = performance.now() / 1000; setStatus(`voice: "${text}"`); }
+  if (st === "speaking") { state.blockedText = null; setStatus(`voice: "${text}"`); }
   else if (st === "blocked") { state.blockedText = text; setStatus("voice blocked by the browser: click anywhere on the page to enable it"); }
   else if (st === "error") setStatus(`voice error: ${detail}`);
   console.log(`[voice] ${st}${detail ? ` (${detail})` : ""}: "${text}"`);
 }
 function ensureSpeaker() {
-  if (!state.speak) state.speak = browserSpeaker({ onState: onVoiceState });
+  if (!state.speak) {
+    const speak = browserSpeaker({ onState: onVoiceState });
+    // Stamped here rather than from the utterance's onstart: that fires
+    // asynchronously, and never at all when the browser refuses to speak, so a
+    // coach asking "has anything just been said?" in the same frame would be
+    // told no and talk over the line that was already on its way out.
+    state.speak = speak && (text => { state.lastSpokeAtS = performance.now() / 1000; return speak(text); });
+  }
   return state.speak;
 }
 document.addEventListener("click", () => {
@@ -701,6 +712,7 @@ ui.coachTest.addEventListener("click", () => {
  */
 const SPEECH_KEY = "smile_detector.speech";
 const REC_KEY = "smile_detector.speechRec";
+const TALK_KEY = "smile_detector.talk";
 let starting_ish = () => false;
 /**
  * Speech, only on the voice entry point: `index.html` never imports the module,
@@ -848,7 +860,11 @@ async function initSpeech() {
       setSpeechInfo("switch speech on to start listening");
     }
   });
-  ui.talk?.addEventListener("change", syncTalkCoach);
+  try { if (localStorage.getItem(TALK_KEY) === "1" && ui.talk) ui.talk.checked = true; } catch {}
+  ui.talk?.addEventListener("change", () => {
+    try { localStorage.setItem(TALK_KEY, ui.talk.checked ? "1" : "0"); } catch {}
+    syncTalkCoach();
+  });
   for (const el of [ui.talkFirst, ui.talkEvery, ui.talkThresh]) el?.addEventListener("change", syncTalkCoach);
   function syncTalkCoach() {
     if (!ui.talk?.checked) { state.talkCoach = null; state.dirty = true; return; }
@@ -857,10 +873,9 @@ async function initSpeech() {
       everyS: Math.max(5, parseFloat(ui.talkEvery?.value) || 60),
       threshold: Math.min(1, Math.max(0, (parseFloat(ui.talkThresh?.value) || 50) / 100)),
       nowS: performance.now() / 1000,
+      canSpeak: t => t - state.lastSpokeAtS >= VOICE_GAP_S,
       speak: text => {
-        const t = performance.now() / 1000;
-        if (t - state.lastSpokeAtS < VOICE_GAP_S) return;
-        if (ensureSpeaker()) { state.lastSpokeAtS = t; state.speak(text); }
+        if (ensureSpeaker()) state.speak(text);
       },
     });
     state.dirty = true;

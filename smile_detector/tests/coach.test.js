@@ -443,3 +443,28 @@ test("talkCoach: a custom threshold moves the line", async () => {
   const c = new TalkCoach({ firstS: 10, threshold: 0.2, nowS: 0 });
   assert.equal(c.feed(0.25, 10).text, TALK_LESS);
 });
+
+test("talkCoach: a verdict due while the other coach talks is postponed, not lost", async () => {
+  const { TalkCoach, TALK_MORE } = await import("../js/coach.js");
+  const spoken = [];
+  let busyUntil = 16;
+  const c = new TalkCoach({
+    firstS: 10, everyS: 60, retryS: 8,
+    canSpeak: now => now >= busyUntil,
+    speak: t => spoken.push(t), nowS: 0,
+  });
+  assert.equal(c.feed(0.1, 10), null, "spoke over the other coach");
+  assert.deepEqual(spoken, []);
+  assert.equal(c.feed(0.1, 17), null, "the retry was not honoured");   // postponed to 18
+  const v = c.feed(0.1, 18);
+  assert.equal(v.text, TALK_MORE);
+  assert.deepEqual(spoken, [TALK_MORE]);
+});
+
+test("talkCoach: without a canSpeak it simply speaks", async () => {
+  const { TalkCoach, TALK_MORE } = await import("../js/coach.js");
+  const spoken = [];
+  const c = new TalkCoach({ firstS: 10, speak: t => spoken.push(t), nowS: 0 });
+  c.feed(0.1, 10);
+  assert.deepEqual(spoken, [TALK_MORE]);
+});

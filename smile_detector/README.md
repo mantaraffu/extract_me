@@ -182,7 +182,12 @@ session JSON.
   lines, where that one compares each round with the last and escalates through
   a list. "Talk more" repeated is a nudge; an escalating scolding about talking
   would be something else entirely. The two share one voice and keep six seconds
-  apart, measured from when this page last spoke rather than from
+  apart. The talk verdict is judged after the smile one and postponed rather
+  than dropped when the voice is busy: both default to the same cadence, so they
+  come due in the same frame, and the one judged first would be cut off a
+  syllable in - every time, which is how it went unheard. The gap is measured
+  from when this page handed a line to the voice, not from the utterance
+  starting (asynchronous, and never at all when the browser refuses) nor from
   `speechSynthesis.speaking`, which is known to stick on after a cancelled line.
 - **Two files on the Desktop**: a session writes what it measured and, beside
   it, what it heard. They are kept apart because they are different kinds of

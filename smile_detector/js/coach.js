@@ -159,15 +159,26 @@ export const TALK_LESS = "talk less";
  * A share exactly on the threshold reads as "talk less": at half the session
  * spent talking there is nothing left to ask for.
  *
+ * Two coaches share one voice, and speaking cancels whatever is being said, so
+ * a verdict due while the other one is talking would be cut off a syllable in.
+ * `canSpeak` postpones it by `retryS` instead of losing it - dropping it
+ * outright was worse, because the two default to the same cadence and would
+ * collide every single time.
+ *
  * Pure logic: time comes in through `feed`, speech goes out through the
  * injected `speak(text)` callback.
  */
 export class TalkCoach {
-  constructor({ firstS = 120, everyS = 60, threshold = 0.5, speak = null, nowS = 0 } = {}) {
+  constructor({
+    firstS = 120, everyS = 60, threshold = 0.5, retryS = 8,
+    speak = null, canSpeak = null, nowS = 0,
+  } = {}) {
     this.firstS = firstS;
     this.everyS = everyS;
     this.threshold = threshold;
+    this.retryS = retryS;
     this.speak = speak;
+    this.canSpeak = canSpeak;
     this.reset(nowS);
   }
 
@@ -186,7 +197,12 @@ export class TalkCoach {
    * or null when it cannot be known yet. Returns the verdict when one is due.
    */
   feed(share, nowS) {
-    return nowS >= this.dueS ? this.check(share, nowS) : null;
+    if (nowS < this.dueS) return null;
+    if (this.canSpeak && !this.canSpeak(nowS)) {
+      this.dueS = nowS + this.retryS;   // the other coach has the voice: come back
+      return null;
+    }
+    return this.check(share, nowS);
   }
 
   /** Deliver a verdict now; the next one is due `everyS` later. */
