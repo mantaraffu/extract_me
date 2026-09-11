@@ -143,6 +143,64 @@ export class SmileCoach {
   }
 }
 
+/** Said when too little of the session was spent talking, and when too much. */
+export const TALK_MORE = "talk more";
+export const TALK_LESS = "talk less";
+
+/**
+ * Talk coach: periodic spoken verdicts on how much of the session was spent
+ * talking, against a share of the whole time the application has been running.
+ *
+ * Deliberately simpler than the smile coach. That one compares each round with
+ * the last and escalates through a list; this one has a fixed threshold and two
+ * lines, because "talk more" repeated is a nudge while an escalating scolding
+ * about talking would be something else entirely.
+ *
+ * A share exactly on the threshold reads as "talk less": at half the session
+ * spent talking there is nothing left to ask for.
+ *
+ * Pure logic: time comes in through `feed`, speech goes out through the
+ * injected `speak(text)` callback.
+ */
+export class TalkCoach {
+  constructor({ firstS = 120, everyS = 60, threshold = 0.5, speak = null, nowS = 0 } = {}) {
+    this.firstS = firstS;
+    this.everyS = everyS;
+    this.threshold = threshold;
+    this.speak = speak;
+    this.reset(nowS);
+  }
+
+  reset(nowS = 0) {
+    this.dueS = nowS + this.firstS;
+    this.last = null;
+  }
+
+  /** Seconds until the next verdict is due. */
+  nextInS(nowS) {
+    return Math.max(0, this.dueS - nowS);
+  }
+
+  /**
+   * One sample. `share` is the talking fraction of the session so far (0..1),
+   * or null when it cannot be known yet. Returns the verdict when one is due.
+   */
+  feed(share, nowS) {
+    return nowS >= this.dueS ? this.check(share, nowS) : null;
+  }
+
+  /** Deliver a verdict now; the next one is due `everyS` later. */
+  check(share, nowS) {
+    const frac = share ?? 0;
+    const kind = frac < this.threshold ? "more" : "less";
+    const text = kind === "more" ? TALK_MORE : TALK_LESS;
+    this.dueS = nowS + this.everyS;
+    this.last = { kind, text, frac, atS: nowS };
+    if (this.speak) this.speak(text);
+    return this.last;
+  }
+}
+
 /**
  * `speak` callback on the Web Speech API. Cuts short whatever is still being
  * said, so verdicts never queue up. Returns null where speech synthesis is not

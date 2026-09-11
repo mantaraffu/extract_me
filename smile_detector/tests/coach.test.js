@@ -395,3 +395,51 @@ test("browserSpeaker: a default in another language is ignored", async () => {
     assert.equal(calls.spoken.at(-1).voice?.name, "Sam", "took the Italian default");
   } finally { dropFakeSpeech(); }
 });
+
+// --- talk coach ---
+
+test("talkCoach: nothing before the first verdict is due", async () => {
+  const { TalkCoach } = await import("../js/coach.js");
+  const spoken = [];
+  const c = new TalkCoach({ firstS: 120, speak: t => spoken.push(t), nowS: 0 });
+  assert.equal(c.feed(0.1, 119), null);
+  assert.deepEqual(spoken, []);
+  assert.equal(c.nextInS(119), 1);
+});
+
+test("talkCoach: under half the session asks for more, over it asks for less", async () => {
+  const { TalkCoach, TALK_MORE, TALK_LESS } = await import("../js/coach.js");
+  const spoken = [];
+  const c = new TalkCoach({ firstS: 10, everyS: 10, speak: t => spoken.push(t), nowS: 0 });
+  assert.equal(c.feed(0.2, 10).text, TALK_MORE);
+  assert.equal(c.feed(0.8, 20).text, TALK_LESS);
+  assert.deepEqual(spoken, [TALK_MORE, TALK_LESS]);
+});
+
+test("talkCoach: exactly on the threshold there is nothing left to ask for", async () => {
+  const { TalkCoach, TALK_LESS } = await import("../js/coach.js");
+  const c = new TalkCoach({ firstS: 10, nowS: 0 });
+  assert.equal(c.feed(0.5, 10).text, TALK_LESS);
+});
+
+test("talkCoach: an unknown share counts as silence", async () => {
+  const { TalkCoach, TALK_MORE } = await import("../js/coach.js");
+  const c = new TalkCoach({ firstS: 10, nowS: 0 });
+  const v = c.feed(null, 10);
+  assert.equal(v.text, TALK_MORE);
+  assert.equal(v.frac, 0);
+});
+
+test("talkCoach: verdicts keep to their interval and do not escalate", async () => {
+  const { TalkCoach, TALK_MORE } = await import("../js/coach.js");
+  const spoken = [];
+  const c = new TalkCoach({ firstS: 10, everyS: 30, speak: t => spoken.push(t), nowS: 0 });
+  for (let t = 1; t <= 80; t++) c.feed(0.1, t);
+  assert.deepEqual(spoken, [TALK_MORE, TALK_MORE, TALK_MORE]);   // 10, 40, 70
+});
+
+test("talkCoach: a custom threshold moves the line", async () => {
+  const { TalkCoach, TALK_LESS } = await import("../js/coach.js");
+  const c = new TalkCoach({ firstS: 10, threshold: 0.2, nowS: 0 });
+  assert.equal(c.feed(0.25, 10).text, TALK_LESS);
+});

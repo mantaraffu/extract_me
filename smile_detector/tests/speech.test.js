@@ -267,3 +267,30 @@ test("the transcriber offers its own ranking line", () => {
   say(t, "the cat sat on the cat mat", 1);
   assert.equal(t.topLine(3), "1: cat 2: mat 3: sat");
 });
+
+test("speaking time is summed from the words, not from the recorder", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  t.result({
+    text: "hello there", final: true, nowS: 10,
+    words: [{ word: "hello", start: 1.0, end: 1.5, conf: 1 },
+            { word: "there", start: 3.0, end: 3.8, conf: 1 }],
+  });
+  t.setRecording(false, 100);              // 100 s of recorder, 1.3 s of talking
+  assert.equal(t.speakingS(), 1.3);
+});
+
+test("the speaking share is over the whole session", () => {
+  const { t } = make();
+  t.setRecording(true, 0);
+  t.result({ text: "one", final: true, nowS: 5, words: [{ word: "one", start: 0, end: 5, conf: 1 }] });
+  assert.equal(t.speakingShare(10), 0.5);
+  assert.equal(t.speakingShare(0), null);
+  assert.equal(t.speakingShare(2), 1, "a share cannot exceed the session");
+});
+
+test("a session with no words has spoken for no time", () => {
+  const { t } = make();
+  assert.equal(t.speakingS(), 0);
+  assert.equal(t.speakingShare(60), 0);
+});

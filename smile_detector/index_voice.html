@@ -83,6 +83,16 @@
   </fieldset>
 
   <fieldset>
+    <legend><label><input id="talk" type="checkbox"> talk coach (voice)</label></legend>
+    <p class="hint">how much of the whole session was spent talking, shown under the happy share.
+    First verdict after <input id="talkFirst" type="number" step="1" min="5" value="120"> s, then every
+    <input id="talkEvery" type="number" step="1" min="5" value="60"> s: below
+    <input id="talkThresh" type="number" step="1" min="0" max="100" value="50">% it says <b>talk more</b>,
+    at or above it <b>talk less</b>. Talking is measured from the word timings, not from how long the
+    recorder was on - a recorder running in a quiet room is not speech.</p>
+  </fieldset>
+
+  <fieldset>
     <legend><label><input id="saveLog" type="checkbox" checked> save session JSON to the Desktop</label></legend>
     <p class="hint">blinks, time smiling and not, emotions, hands, coach verdicts, recognised commands
     and free transcripts, and a per-minute timeline. Written when the page closes, every 30 s, and on demand. Needs the bundled server

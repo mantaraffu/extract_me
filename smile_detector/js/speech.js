@@ -256,6 +256,26 @@ export class Transcriber {
     return topLine(this.text(), n);
   }
 
+  /**
+   * Seconds actually spent talking, summed from the word timings rather than
+   * from how long the recorder was on: a recorder left running in a quiet room
+   * is not speech. Only finalised words carry timings, so a sentence still
+   * unfinalised is not counted yet - it arrives with the next final result or
+   * with the flush.
+   */
+  speakingS() {
+    let total = 0;
+    for (const w of this.wordList) {
+      if (typeof w.atS === "number" && typeof w.endS === "number" && w.endS > w.atS) total += w.endS - w.atS;
+    }
+    return +total.toFixed(2);
+  }
+
+  /** Talking as a share of `elapsedS`, 0..1, null when no time has passed. */
+  speakingShare(elapsedS) {
+    return elapsedS > 0 ? Math.min(1, this.speakingS() / elapsedS) : null;
+  }
+
   /** Mean confidence over the finalised utterances, null when there are none. */
   confidence() {
     if (!this.confs.length) return null;

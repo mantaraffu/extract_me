@@ -119,6 +119,8 @@ export class SessionLog {
       startedAt: new Date(this.startedAt).toISOString(),
       endedAt: new Date(this.startedAt + elapsedS * 1000).toISOString(),
       recordedS: t.recordedS, words: t.words, conf: t.conf,
+      // talking against the whole session, which is the reading the screen shows
+      elapsedS: t.elapsedS ?? null, speakingS: t.speakingS ?? null, speakingPct: t.speakingPct ?? null,
       text: t.text,
       top: t.top || [],
       timings: t.timings || [],

@@ -169,6 +169,21 @@ session JSON.
   microphone with the webcam, the file itself when a video is loaded, at 16 kHz
   - so a loaded video plays back dull, being a test source rather than something
   an audience listens to.
+- **Talking share and the talk coach** (`index_voice.html` only): under the
+  happy percentage, the share of the **whole time the application has been
+  running** that was spent talking. It is summed from the word timings, not from
+  how long the recorder was on - a recorder left running in a quiet room is not
+  speech - so a sentence Vosk has not finalised yet is not counted until it
+  arrives. With the talk coach on, a verdict every minute says **"talk more"**
+  below 50% and **"talk less"** at or above it; the threshold and the timings
+  are in the panel, and the share also goes into the transcript file as
+  `speakingS`, `elapsedS` and `speakingPct`.
+  It is deliberately simpler than the smile coach: a fixed threshold and two
+  lines, where that one compares each round with the last and escalates through
+  a list. "Talk more" repeated is a nudge; an escalating scolding about talking
+  would be something else entirely. The two share one voice and keep six seconds
+  apart, measured from when this page last spoke rather than from
+  `speechSynthesis.speaking`, which is known to stick on after a cancelled line.
 - **Two files on the Desktop**: a session writes what it measured and, beside
   it, what it heard. They are kept apart because they are different kinds of
   record - read by different people, kept for different reasons, shared under

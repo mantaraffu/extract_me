@@ -12,7 +12,7 @@ import { EmotionSmoother } from "./smoother.js";
 import { expressionsFromBlendshapes, LABELS } from "./expressions.js";
 import { PositiveTimer, formatDuration } from "./positive_timer.js";
 import { ZoomTracker } from "./zoom.js";
-import { SmileCoach, browserSpeaker } from "./coach.js";
+import { SmileCoach, TalkCoach, browserSpeaker } from "./coach.js";
 import { SessionLog, sessionFileName, transcriptFileName } from "./session_log.js";
 
 /**
@@ -33,6 +33,9 @@ function showFatal(what, err) {
 window.addEventListener("error", e => showFatal("error", e.error || e.message));
 window.addEventListener("unhandledrejection", e => showFatal("failed", e.reason));
 
+/** Seconds a coach leaves after another one has spoken, so they do not overlap. */
+const VOICE_GAP_S = 6;
+
 /** The emotion labels that make the positive-time stopwatch run. */
 const POSITIVE_LABELS = new Set(["happy"]);
 
@@ -52,6 +55,7 @@ const ui = {
   posTimer: $("posTimer"), zoom: $("zoom"),
   coach: $("coach"), coachFirst: $("coachFirst"), coachEvery: $("coachEvery"), coachThresh: $("coachThresh"), coachTest: $("coachTest"),
   speech: $("speech"), speechRec: $("speechRec"), speechText: $("speechText"),
+  talk: $("talk"), talkFirst: $("talkFirst"), talkEvery: $("talkEvery"), talkThresh: $("talkThresh"),
   speechModel: $("speechModel"), speechLib: $("speechLib"), speechInfo: $("speechInfo"),
   saveLog: $("saveLog"), saveNow: $("saveNow"), saveInfo: $("saveInfo"),
   stats: $("stats"), bars: $("bars"),
@@ -96,6 +100,9 @@ const state = {
   startTime: performance.now(),  // wall-clock start, for the elapsed-time clock
   elapsed: 0,                    // seconds since startTime (updated each frame)
   pctPositive: 0,                // 0-100, positive.seconds / faceTime.seconds
+  pctTalk: null,                 // 0-100 of elapsed spent talking, null without a transcriber
+  talkCoach: null,               // TalkCoach while the talk verdicts are on
+  lastSpokeAtS: -1e9,            // when a line was last handed to the voice, to keep two coaches apart
 };
 
 const setStatus = msg => { ui.status.textContent = msg; };
@@ -289,6 +296,17 @@ function processFrame(src) {
   // stopwatches, not a third accumulator, so it always agrees with them.
   state.elapsed = nowS - state.startTime / 1000;
   state.pctPositive = state.faceTime.seconds > 0 ? 100 * state.positive.seconds / state.faceTime.seconds : 0;
+  // talking is measured against the whole time the application has been up,
+  // not against the time the recorder was on: a recorder left running in a
+  // quiet room is not speech
+  const talkShare = state.speech ? state.speech.speakingShare(state.elapsed) : null;
+  state.pctTalk = talkShare === null ? null : 100 * talkShare;
+
+  // --- talk coach: how much of the session was spent talking ---
+  if (state.talkCoach) {
+    const verdict = state.talkCoach.feed(talkShare, nowS);
+    if (verdict) console.log(`[talk] ${verdict.kind}: "${verdict.text}" talking=${(verdict.frac * 100).toFixed(1)}%`);
+  }
 
   // --- smile coach: happy time over face time, a spoken verdict when due ---
   if (state.coach) {
@@ -350,7 +368,8 @@ function render(src, { face, blink, preds, rect, nowS }) {
   if (ui.posTimer.checked) {
     const elapsedBottom = drawElapsedTimer(W, H);
     const posBottom = drawPositiveTimer(W, H, elapsedBottom);
-    drawPositivePct(W, posBottom);
+    const pctBottom = drawPositivePct(W, posBottom);
+    drawTalkPct(W, pctBottom);
   }
   if (state.coach) drawCoach(W, H, nowS);
 
@@ -472,8 +491,28 @@ function drawPositivePct(W, topY) {
   ctx.textAlign = "center";
   ctx.fillStyle = "rgba(255,255,255,.75)";
   const txt = `session ${state.faceTime.seconds > 0 ? state.pctPositive.toFixed(1) : "--"}% happy`;
-  ctx.fillText(txt, W / 2, topY + size * 0.3);
+  const y = topY + size * 0.3;
+  ctx.fillText(txt, W / 2, y);
   ctx.restore();
+  return y + size * 1.15;
+}
+
+/**
+ * Talking as a share of the whole session, under the happy one. Dimmer than it,
+ * because it is the second reading and not the one the piece is named after,
+ * and absent entirely on the page without speech.
+ */
+function drawTalkPct(W, topY) {
+  if (state.pctTalk === null) return topY;
+  const size = Math.max(12, Math.round(ui.canvas.height / 28));
+  ctx.save();
+  ctx.font = `500 ${size}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.textBaseline = "top";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(255,255,255,.55)";
+  ctx.fillText(`${state.pctTalk.toFixed(1)}% talking`, W / 2, topY);
+  ctx.restore();
+  return topY + size * 1.15;
 }
 
 /**
@@ -530,6 +569,7 @@ function publish({ face, blink, expr, preds, rect, hands }) {
     blink: blink ? { level: blink.level, closed: blink.closed, blinked: blink.blinked, count: blink.blinks, perMin: blink.perMin } : null,
     positiveTime: { seconds: state.positive.seconds, running: state.positive.running },
     elapsed: state.elapsed, faceTime: state.faceTime.seconds, pctPositive: state.pctPositive,
+    pctTalk: state.pctTalk,
     coach: state.coach ? {
       happyFrac: state.coach.fraction(), reference: state.coach.reference, prevFrac: state.coach.prevFrac,
       nextInS: state.coach.nextInS(performance.now() / 1000), last: state.coach.last,
@@ -615,7 +655,7 @@ function loadCoachSettings() {
 
 /** Speech feedback in the status line; a blocked line is retried on the next click. */
 function onVoiceState(st, text, detail) {
-  if (st === "speaking") { state.blockedText = null; setStatus(`voice: "${text}"`); }
+  if (st === "speaking") { state.blockedText = null; state.lastSpokeAtS = performance.now() / 1000; setStatus(`voice: "${text}"`); }
   else if (st === "blocked") { state.blockedText = text; setStatus("voice blocked by the browser: click anywhere on the page to enable it"); }
   else if (st === "error") setStatus(`voice error: ${detail}`);
   console.log(`[voice] ${st}${detail ? ` (${detail})` : ""}: "${text}"`);
@@ -678,6 +718,18 @@ async function initSpeech() {
   const { ENCOURAGEMENTS, REPRIMANDS, STEADY } = await import("./coach.js");
   const setSpeechInfo = t => { if (ui.speechInfo) ui.speechInfo.textContent = t; };
 
+  /**
+   * The talk verdicts share the coach's voice, and the coach cancels whatever
+   * is being said when it speaks. Rather than cut a verdict off mid-sentence, a
+   * talk line that lands right after one is dropped: it comes round again next
+   * interval, and two coaches talking over each other would be worse than a
+   * missed nudge.
+   *
+   * The gap is measured from when this page last handed a line to the voice,
+   * not from `speechSynthesis.speaking`: that flag is known to stick on after a
+   * cancelled utterance, and a stuck flag would silence the talk coach for the
+   * rest of the session with nothing to show for it.
+   */
   state.speech = new Transcriber({
     coachPhrases: [...ENCOURAGEMENTS, ...REPRIMANDS, STEADY],
     nowS: performance.now() / 1000,
@@ -796,11 +848,30 @@ async function initSpeech() {
       setSpeechInfo("switch speech on to start listening");
     }
   });
+  ui.talk?.addEventListener("change", syncTalkCoach);
+  for (const el of [ui.talkFirst, ui.talkEvery, ui.talkThresh]) el?.addEventListener("change", syncTalkCoach);
+  function syncTalkCoach() {
+    if (!ui.talk?.checked) { state.talkCoach = null; state.dirty = true; return; }
+    state.talkCoach = new TalkCoach({
+      firstS: Math.max(5, parseFloat(ui.talkFirst?.value) || 120),
+      everyS: Math.max(5, parseFloat(ui.talkEvery?.value) || 60),
+      threshold: Math.min(1, Math.max(0, (parseFloat(ui.talkThresh?.value) || 50) / 100)),
+      nowS: performance.now() / 1000,
+      speak: text => {
+        const t = performance.now() / 1000;
+        if (t - state.lastSpokeAtS < VOICE_GAP_S) return;
+        if (ensureSpeaker()) { state.lastSpokeAtS = t; state.speak(text); }
+      },
+    });
+    state.dirty = true;
+  }
+
   ui.speechRec?.addEventListener("change", () => {
     try { localStorage.setItem(REC_KEY, ui.speechRec.checked ? "1" : "0"); } catch {}
     startListening();                      // recording implies wanting to listen
     syncRecording();
   });
+  syncTalkCoach();
   if (!ui.speech?.checked) setSpeechInfo("switch speech on to start listening");
 }
 if (window.SMILE_SPEECH) initSpeech();
@@ -819,6 +890,8 @@ function sessionBody(reason) {
       text: state.speech.text(), words: state.speech.words(),
       conf: state.speech.confidence(), recordedS: +state.speech.seconds(nowS).toFixed(2),
       top: state.speech.top(5), top3: state.speech.topLine(3), timings: state.speech.wordTimings(),
+      speakingS: state.speech.speakingS(), elapsedS: +state.elapsed.toFixed(2),
+      speakingPct: state.pctTalk === null ? null : +state.pctTalk.toFixed(1),
       file: state.transcriptFile, sessionFile: state.logFile,
     });
     state.log.speechStats({
