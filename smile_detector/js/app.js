@@ -651,8 +651,8 @@ async function initSpeech() {
 
   state.speech = new SpeechRouter({
     commands: COMMANDS,
-    freeMaxS: Math.max(2, parseFloat(ui.speechMax?.value) || 20),
-    freeSilenceS: Math.max(0.3, parseFloat(ui.speechSilence?.value) || 1.5),
+    freeMaxS: Math.max(2, parseFloat(ui.speechMax?.value) || 30),
+    freeSilenceS: Math.max(0.3, parseFloat(ui.speechSilence?.value) || 3),
     freeLeadS: Math.max(0.5, parseFloat(ui.speechLead?.value) || 4),
     coachPhrases: [...ENCOURAGEMENTS, ...REPRIMANDS, STEADY],
     nowS: performance.now() / 1000,

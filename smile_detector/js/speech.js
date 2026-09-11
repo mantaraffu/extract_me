@@ -13,7 +13,11 @@
  * instead - but not the first final result, because Vosk emits one at every
  * pause and a mid-thought breath would truncate the answer. The window stays
  * open until nothing new has arrived for `freeSilenceS`, with `freeMaxS` as
- * the hard ceiling for whoever never stops.
+ * the hard ceiling for whoever never stops. `freeSilenceS` has to allow for a
+ * thinking pause mid-sentence, not just the gap between words: at 1.5 s it shut
+ * on people who were still talking, and since the audio then goes back to the
+ * command recognizer - which drops everything outside its grammar - the rest of
+ * what they said vanished and the whole thing looked like it had stopped.
  *
  * Silence before the visitor has started is a different thing from silence
  * after they finished, and treating them alike closed the window on anyone who
@@ -93,7 +97,7 @@ export const UNK_WORD = normalize(UNK);
 export class SpeechRouter {
   constructor({
     commands = COMMANDS, openFree = OPEN_FREE,
-    freeMaxS = 20, freeSilenceS = 1.5, freeLeadS = 4,
+    freeMaxS = 30, freeSilenceS = 3, freeLeadS = 4,
     coachPhrases = [],
     onCommand = null, onFree = null, onOpen = null, nowS = 0,
   } = {}) {
@@ -151,15 +155,16 @@ export class SpeechRouter {
 
     if (this.mode === "command") {
       if (!final || !clean) return null;
-      if (!this.commands.includes(clean)) {                // outside the grammar
+      const hit = this.matchCommand(clean);
+      if (!hit) {                                          // outside the grammar
         // what it heard instead is the one thing worth keeping: a grammar that
         // never matches looks exactly like a microphone that never worked.
         if (this.stats.unmatched.length < 12) this.stats.unmatched.push(clean);
         return null;
       }
       this.stats.matched++;
-      if (clean === this.openFree) { this.openWindow(nowS); return null; }
-      this.last = { kind: "command", command: clean, atS: nowS };
+      if (hit === this.openFree) { this.openWindow(nowS); return null; }
+      this.last = { kind: "command", command: hit, atS: nowS };
       if (this.onCommand) this.onCommand(this.last);
       return this.last;
     }
@@ -186,6 +191,20 @@ export class SpeechRouter {
       : nowS - this.openedS >= this.freeLeadS;      // nobody ever started
     const expired = nowS - this.openedS >= this.freeMaxS;
     return quiet || expired ? this.closeWindow(nowS, expired && !quiet ? "timeout" : "silence") : null;
+  }
+
+  /**
+   * The command this text stands for, or null. Vosk returns what it managed to
+   * decode, which for a multi-word command is often only part of it - "save"
+   * for "save session" - so an unambiguous prefix counts. With a handful of
+   * commands there is nothing for it to collide with, and a half-heard command
+   * is still unmistakably that command.
+   */
+  matchCommand(clean) {
+    if (!clean) return null;
+    if (this.commands.includes(clean)) return clean;
+    const starts = this.commands.filter(c => c.startsWith(`${clean} `));
+    return starts.length === 1 ? starts[0] : null;
   }
 
   /** Is this the tail of the command that opened the window, rather than speech? */

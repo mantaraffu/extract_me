@@ -290,3 +290,39 @@ test("finalised sentences and a trailing unfinalised one are joined", () => {
   assert.equal(seg.text, "first sentence and then some more");
   assert.equal(seg.fromPartial, true);
 });
+
+test("a command heard short of its full phrase still counts", () => {
+  const { r, commands } = routerWith();
+  say(r, "save", 1);                       // Vosk decoded only half of "save session"
+  assert.deepEqual(commands.map(c => c.command), ["save session"]);
+});
+
+test("a half-heard opening command still opens the window", () => {
+  const { r } = routerWith();
+  say(r, "tell", 1);
+  assert.equal(r.mode, "free");
+});
+
+test("an ambiguous prefix matches nothing", () => {
+  const { r, commands } = routerWith({ commands: ["save session", "save frame"] });
+  assert.equal(say(r, "save", 1), null);
+  assert.deepEqual(commands, []);
+  assert.deepEqual(r.stats.unmatched, ["save"]);
+});
+
+test("a prefix of nothing is still unmatched", () => {
+  const { r, commands } = routerWith();
+  assert.equal(say(r, "banana", 1), null);
+  assert.deepEqual(commands, []);
+});
+
+test("a thinking pause mid-sentence no longer closes the window", () => {
+  const { r, segments } = routerWith();          // defaults: 3 s of silence
+  say(r, OPEN_FREE, 0);
+  say(r, "i think", 1);
+  assert.equal(r.tick(3.0), null);               // a 2 s pause: the old 1.5 s shut here
+  say(r, "it was strange", 3.2);
+  const seg = r.tick(6.3);
+  assert.equal(seg.text, "i think it was strange");
+  assert.equal(segments.length, 1);
+});

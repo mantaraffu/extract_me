@@ -120,8 +120,14 @@ Keys: `h` panel, `o` overlay, `m` mirror, `f` fullscreen, `r` reset rect,
   "stop" is just a word, and a visitor saying it mid-sentence would cut
   themselves off - so silence closes it, though not the first final result,
   since Vosk emits one at every pause and a mid-thought breath would truncate
-  the answer: it stays open until nothing new has arrived for 1.5 s, with 20 s
-  as the ceiling. Silence before the visitor has started is not the same thing
+  the answer: it stays open until nothing new has arrived for 3 s, with 30 s
+  as the ceiling. That silence has to allow for a thinking pause mid-sentence,
+  not merely the gap between words: at 1.5 s it shut on people who were still
+  talking, and since the audio then goes back to the command recogniser, which
+  drops everything outside its grammar, the rest of what they said vanished and
+  the whole thing looked like it had stopped after one answer. A command heard
+  short of its full phrase - "save" for "save session", which is what Vosk
+  usually returns - counts as that command when the prefix is unambiguous. Silence before the visitor has started is not the same thing
   as silence after they finished: they get 4 s to begin, and only once something
   has been said does the 1.5 s rule take over - otherwise anyone who paused to
   think lost their window. The tail of the opening command ("me", of "tell me")
