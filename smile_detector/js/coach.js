@@ -152,14 +152,20 @@ export class SmileCoach {
  * browser refused to speak: Chrome wants a click on the page first) or
  * "error". Speech fails silently otherwise, which is the worst way to fail.
  */
-export function browserSpeaker({ lang = "en_US", rate = 1, onState = null } = {}) {
+export function browserSpeaker({ lang = "en-US", rate = 1, onState = null } = {}) {
   if (typeof speechSynthesis === "undefined" || typeof SpeechSynthesisUtterance === "undefined") return null;
   let current = null;   // held on purpose: Firefox drops an utterance that gets garbage-collected mid-speech
+  // Language tags are matched leniently: they are written "en-US" but turn up
+  // as "en_US" and in any case, and a tag that fails to match does not fall
+  // back to another English voice - it falls back to the system default, which
+  // on an Italian machine is an Italian voice reading English lines.
+  const tag = t => (t || "").toLowerCase().replace(/_/g, "-");
+  const want = tag(lang);
   return text => {
     const u = new SpeechSynthesisUtterance(text);
-    const voice = speechSynthesis.getVoices().find(v => v.lang.toLowerCase().startsWith(lang));
+    const voice = speechSynthesis.getVoices().find(v => tag(v.lang).startsWith(want));
     if (voice) u.voice = voice;
-    u.lang = voice?.lang || lang;
+    u.lang = voice?.lang || want;
     u.rate = rate;
     u.onstart = () => onState?.("speaking", text);
     u.onend = () => onState?.("done", text);

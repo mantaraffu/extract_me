@@ -308,3 +308,18 @@ test("steadyMin raises the floor under the steady line", () => {
   run(c, 120, 60, 0.1);      // unchanged at 10%, below the floor
   assert.equal(c.last.kind, "reprimand");
 });
+
+test("browserSpeaker: a language tag matches whatever its spelling", async () => {
+  const { browserSpeaker } = await import("../js/coach.js");
+  const calls = fakeSpeech();
+  try {
+    // "en_US" is how the tag gets written by hand; voices report "en-US"
+    for (const lang of ["en-US", "en_US", "EN-us", "en"]) {
+      browserSpeaker({ lang })("hi");
+      assert.equal(calls.spoken.at(-1).voice?.name, "Sam", `no voice for ${lang}`);
+      assert.equal(calls.spoken.at(-1).lang, "en-US", `wrong tag for ${lang}`);
+    }
+    browserSpeaker({ lang: "it" })("ciao");
+    assert.equal(calls.spoken.at(-1).voice?.name, "It");
+  } finally { dropFakeSpeech(); }
+});
