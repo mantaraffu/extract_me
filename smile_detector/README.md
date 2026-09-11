@@ -150,9 +150,13 @@ session JSON.
   average of 0.82 sat on a largely wrong transcript, while per word it says
   which parts to trust - and the instants line speech up against the smiling and
   blinking already on that timeline. And a **ranking of the most frequent
-  meaningful words**, with stop words and demonstratives removed: the list lives
-  at the top of `speech.js` and is meant to be edited, since what counts as
-  noise depends on what the installation is asking people. It appears twice, for
+  meaningful words**, counting content words only: the stop list
+  lives at the top of `speech.js`, grouped so it can be argued with. Grammar,
+  auxiliaries and interjections are closed classes and barely a judgement call;
+  light verbs and placeholder nouns ("say", "know", "thing", "kind") are, and
+  where one stops being empty and starts being the point depends on what the
+  installation asks people - "felt" and "laughed" are subject matter here, and
+  are deliberately absent from the list. It appears twice, for
   two readers: `top` as five entries with their counts, and `top3` as one line -
   `1: sister 2: happy 3: laughed` - written last in the file, where a person
   ends up.

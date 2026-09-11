@@ -63,33 +63,58 @@ export function stripUnk(clean) {
 
 /**
  * Words that say nothing about what a session was about. The ranking exists to
- * surface subject matter, and without this list it reports "the", "and", "i"
- * every single time. Demonstratives are in it for the same reason: "this" and
- * "that" are frequent everywhere and specific to nothing.
+ * surface subject matter, so it counts content words only: everything here is
+ * frequent everywhere and specific to nothing.
  *
- * Edit it here. It is deliberately a plain list rather than a cleverer rule:
- * what counts as noise depends on what the installation is asking people.
+ * Grouped so it can be argued with. The first three groups are closed classes
+ * and are not really a judgement call; the last two are. Where a light verb
+ * stops being empty and starts being the point depends on what the installation
+ * asks people - "felt" and "laughed" are subject matter here and deliberately
+ * absent - so move words between the groups and the list as you learn what your
+ * visitors actually say.
  */
-export const STOP_WORDS = new Set(`
-a about above after again against all am an and any are as at
-be because been before being below between both but by
-can cannot could
-did do does doing don down during
-each few for from further
-had has have having he her here hers herself him himself his how
-i if in into is it its itself
-just
-me more most my myself
-no nor not now
-of off on once only or other our ours ourselves out over own
-same she should so some such
-than that the their theirs them themselves then there these they this those through to too
-under until up
-very
-was we were what when where which while who whom why will with would
-you your yours yourself yourselves
-yeah yes ok okay like got get go going really thing things kind sort
-`.trim().split(/\s+/));
+const STOP_GROUPS = {
+  // articles, pronouns, prepositions, conjunctions, demonstratives
+  grammar: `
+    a an the this that these those there here
+    i me my myself mine we us our ours ourselves you your yours yourself yourselves
+    he him his himself she her hers herself it its itself they them their theirs themselves
+    who whom whose which what when where why how
+    and or but nor so than then if because as while although though unless until since
+    of in on at by for with without from to into onto out up down over under above below
+    between through during after before again off own same other another each every
+    all any both few more most much many some such no not only very just too also
+  `,
+  // auxiliaries and modals
+  verbs_of_grammar: `
+    am is are was were be been being
+    do does did doing done
+    have has had having
+    can could shall should will would may might must need ought
+    let s t don didn doesn isn aren wasn weren won wouldn couldn shouldn
+  `,
+  // interjections, hesitation and the sounds a recogniser turns them into
+  noise: `
+    ah aah ahh eh eeh er erm hm hmm mm mmm mhm uh uhm um umm huh ha haha aha
+    oh ooh ow ugh oops wow yay hey hi hello bye yeah yep yes nope ok okay right
+    well anyway actually basically literally really quite rather maybe probably
+    please thanks thank sorry
+  `,
+  // light verbs and placeholder nouns: frequent, and never the subject
+  filler: `
+    say says said tell tells told mean means meant
+    know knew think thought guess suppose wonder
+    go goes going went come comes came get gets got getting
+    make makes made take takes took put puts give gives gave
+    look looks looked seem seems like likes
+    thing things stuff kind sort bit lot way ways time times
+  `,
+};
+
+/** The stop list, flattened. Edit `STOP_GROUPS` above, not this. */
+export const STOP_WORDS = new Set(
+  Object.values(STOP_GROUPS).join(" ").trim().split(/\s+/).filter(Boolean)
+);
 
 /** The `n` most frequent words that carry meaning, most frequent first. */
 export function topWords(text, n = 5, stop = STOP_WORDS) {

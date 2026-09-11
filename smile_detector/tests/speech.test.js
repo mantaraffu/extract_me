@@ -157,10 +157,29 @@ test("reset empties the transcript but keeps the session counters", () => {
 
 // --- word ranking ---
 
-test("the ranking drops stop words and demonstratives", async () => {
+test("the ranking keeps content words and nothing else", async () => {
   const { topWords } = await import("../js/speech.js");
+  // grammar, an auxiliary, a filler verb and a placeholder noun: all of it goes
   const top = topWords("this is the thing that i think that this sister said to that sister");
-  assert.deepEqual(top.map(t => t.word), ["sister", "said", "think"]);
+  assert.deepEqual(top.map(t => t.word), ["sister"]);
+});
+
+test("interjections never reach the ranking", async () => {
+  const { topWords, topLine } = await import("../js/speech.js");
+  assert.deepEqual(topWords("ah uhm eh er hmm oh yeah ok wow huh"), []);
+  // the shape of a real session: hesitation around two content words
+  assert.equal(topLine("ah it s called ah in love yeah uhm a new tab"),
+    "1: called 2: love 3: new");
+});
+
+test("emotion words are subject matter here, not noise", async () => {
+  const { topWords } = await import("../js/speech.js");
+  const top = topWords("i felt happy and then i laughed because she felt happy too");
+  assert.deepEqual(top, [
+    { word: "felt", count: 2 },
+    { word: "happy", count: 2 },
+    { word: "laughed", count: 1 },
+  ]);
 });
 
 test("the ranking is ordered by count, alphabetical on ties", async () => {
