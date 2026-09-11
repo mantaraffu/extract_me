@@ -170,7 +170,7 @@ export class SmileCoach {
  * browser refused to speak: Chrome wants a click on the page first) or
  * "error". Speech fails silently otherwise, which is the worst way to fail.
  */
-export function browserSpeaker({ lang = "en-US", rate = 1, onState = null } = {}) {
+export function browserSpeaker({ lang = "en_US", rate = 1, onState = null } = {}) {
   if (typeof speechSynthesis === "undefined" || typeof SpeechSynthesisUtterance === "undefined") return null;
   let current = null;   // held on purpose: Firefox drops an utterance that gets garbage-collected mid-speech
   const tag = t => (t || "").toLowerCase().replace(/_/g, "-");
