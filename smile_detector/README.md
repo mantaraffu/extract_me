@@ -95,8 +95,16 @@ session JSON.
   very first verdict has nothing to compare with and goes by the 30%
   threshold. Both shares are over the time a face was visible, not
   wall-clock time. A verdict comes at every deadline, no exceptions: a round
-  with no face at all counts as 0% happy. Speech is the browser's Web Speech API with an
-  English system voice. Chrome only speaks after a click on the page: a line
+  with no face at all counts as 0% happy. Speech is the browser's Web Speech API, pinned to an
+  English voice: leaving the voice unset does not mean "some English voice", it
+  means the system default, which on an Italian machine is an Italian voice
+  reading English lines. The search widens instead of giving up - the exact tag,
+  then any variant of it, then any English voice at all - and never crosses into
+  another language; a machine with no English voice installed says so through
+  the status line rather than quietly sounding Italian. Voices load
+  asynchronously and `getVoices()` is usually empty on the first call, which is
+  when the first verdict lands, so the choice is retried and redone when the
+  browser announces the list. Chrome only speaks after a click on the page: a line
   it refuses shows "voice blocked" in the status line and is said at the next
   click anywhere. The status line also echoes each line as it is spoken, so a
   silent coach is never a mystery. The panel settings, including the on/off

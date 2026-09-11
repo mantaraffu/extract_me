@@ -235,12 +235,13 @@ test("a null reference falls back to the previous window", () => {
 
 // --- browserSpeaker on a fake Web Speech API ---
 
-function fakeSpeech() {
-  const calls = { spoken: [], cancels: 0 };
+function fakeSpeech(voices = [{ name: "It", lang: "it-IT" }, { name: "Sam", lang: "en-US" }]) {
+  const calls = { spoken: [], cancels: 0, voices, listeners: [] };
   globalThis.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
   globalThis.speechSynthesis = {
     speaking: false, pending: false,
-    getVoices: () => [{ name: "It", lang: "it-IT" }, { name: "Sam", lang: "en-US" }],
+    getVoices: () => calls.voices,
+    addEventListener: (ev, fn) => { if (ev === "voiceschanged") calls.listeners.push(fn); },
     cancel() { calls.cancels++; },
     speak(u) { calls.spoken.push(u); },
   };
@@ -321,5 +322,50 @@ test("browserSpeaker: a language tag matches whatever its spelling", async () =>
     }
     browserSpeaker({ lang: "it" })("ciao");
     assert.equal(calls.spoken.at(-1).voice?.name, "It");
+  } finally { dropFakeSpeech(); }
+});
+
+test("browserSpeaker: an English variant is taken over a system voice", async () => {
+  const { browserSpeaker } = await import("../js/coach.js");
+  const calls = fakeSpeech([{ name: "It", lang: "it-IT" }, { name: "Brit", lang: "en-GB" }]);
+  try {
+    browserSpeaker({ lang: "en-US" })("hi");      // no en-US on this machine
+    assert.equal(calls.spoken.at(-1).voice?.name, "Brit");   // not the Italian default
+    assert.equal(calls.spoken.at(-1).lang, "en-GB");
+  } finally { dropFakeSpeech(); }
+});
+
+test("browserSpeaker: never falls back to a voice of another language", async () => {
+  const { browserSpeaker } = await import("../js/coach.js");
+  const states = [];
+  const calls = fakeSpeech([{ name: "It", lang: "it-IT" }, { name: "Fr", lang: "fr-FR" }]);
+  try {
+    browserSpeaker({ lang: "en-US", onState: (s, t, d) => states.push([s, d]) })("hi");
+    assert.equal(calls.spoken.at(-1).voice, undefined);      // rather than the Italian one
+    assert.equal(calls.spoken.at(-1).lang, "en-us");         // never the system locale
+    assert.ok(states.some(([s, d]) => s === "error" && /no en voice/.test(d)), states.join("|"));
+  } finally { dropFakeSpeech(); }
+});
+
+test("browserSpeaker: voices arriving late still get used", async () => {
+  const { browserSpeaker } = await import("../js/coach.js");
+  const calls = fakeSpeech([]);                   // getVoices() is empty at first, as it usually is
+  try {
+    const speak = browserSpeaker({ lang: "en-US" });
+    speak("too early");
+    assert.equal(calls.spoken.at(-1).voice, undefined);
+    calls.voices = [{ name: "Sam", lang: "en-US" }];
+    for (const fn of calls.listeners) fn();       // the browser announces the list
+    speak("now");
+    assert.equal(calls.spoken.at(-1).voice?.name, "Sam");
+  } finally { dropFakeSpeech(); }
+});
+
+test("browserSpeaker: an exact tag wins over a variant", async () => {
+  const { browserSpeaker } = await import("../js/coach.js");
+  const calls = fakeSpeech([{ name: "Brit", lang: "en-GB" }, { name: "Sam", lang: "en-US" }]);
+  try {
+    browserSpeaker({ lang: "en-US" })("hi");
+    assert.equal(calls.spoken.at(-1).voice?.name, "Sam");
   } finally { dropFakeSpeech(); }
 });

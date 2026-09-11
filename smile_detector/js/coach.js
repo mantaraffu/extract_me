@@ -144,9 +144,27 @@ export class SmileCoach {
 }
 
 /**
- * `speak` callback on the Web Speech API. Prefers an English voice and cuts
- * short whatever is still being said, so verdicts never queue up. Returns
- * null where speech synthesis is not available.
+ * `speak` callback on the Web Speech API. Cuts short whatever is still being
+ * said, so verdicts never queue up. Returns null where speech synthesis is not
+ * available.
+ *
+ * The voice is pinned to English, deliberately and defensively. Leaving
+ * `u.voice` unset does not mean "some English voice", it means the system
+ * default: on an Italian machine, an Italian voice reading English lines. So
+ * the search widens rather than giving up - the exact tag, then any variant of
+ * it, then any voice of the same language at all - and only if the machine has
+ * no English voice installed does it fall through, saying so through `onState`
+ * instead of quietly sounding Italian. It never picks a voice of another
+ * language: a wrong accent is a nuisance, a wrong language is gibberish.
+ *
+ * Tags are matched leniently. They are written "en-US" but turn up as "en_US"
+ * and in any case, and a tag that fails to match is indistinguishable from
+ * having no voice at all.
+ *
+ * Voices load asynchronously and `getVoices()` usually returns an empty array
+ * on the first call, which is exactly when the coach says its first line. The
+ * choice is therefore made lazily, retried until it succeeds, and redone when
+ * the browser announces the list has arrived.
  *
  * `onState(state, text, detail)` reports "speaking", "done", "blocked" (the
  * browser refused to speak: Chrome wants a click on the page first) or
@@ -155,17 +173,37 @@ export class SmileCoach {
 export function browserSpeaker({ lang = "en-US", rate = 1, onState = null } = {}) {
   if (typeof speechSynthesis === "undefined" || typeof SpeechSynthesisUtterance === "undefined") return null;
   let current = null;   // held on purpose: Firefox drops an utterance that gets garbage-collected mid-speech
-  // Language tags are matched leniently: they are written "en-US" but turn up
-  // as "en_US" and in any case, and a tag that fails to match does not fall
-  // back to another English voice - it falls back to the system default, which
-  // on an Italian machine is an Italian voice reading English lines.
   const tag = t => (t || "").toLowerCase().replace(/_/g, "-");
   const want = tag(lang);
+  const base = want.split("-")[0];        // "en" out of "en-US"
+
+  let chosen = null, missing = false;
+  function pick() {
+    const voices = speechSynthesis.getVoices() || [];
+    if (!voices.length) return null;      // not loaded yet: ask again next time
+    const match = voices.find(v => tag(v.lang) === want)
+      || voices.find(v => tag(v.lang).startsWith(`${want}-`))
+      || voices.find(v => tag(v.lang).split("-")[0] === base);
+    missing = !match;                     // the list is loaded and has no such language
+    return match || null;
+  }
+  // Re-pick when the list finally arrives, so the first line is not the one
+  // that misses out.
+  if (typeof speechSynthesis.addEventListener === "function") {
+    speechSynthesis.addEventListener("voiceschanged", () => { chosen = pick(); });
+  }
+
   return text => {
+    if (!chosen) chosen = pick();
     const u = new SpeechSynthesisUtterance(text);
-    const voice = speechSynthesis.getVoices().find(v => tag(v.lang).startsWith(want));
-    if (voice) u.voice = voice;
-    u.lang = voice?.lang || want;
+    if (chosen) {
+      u.voice = chosen;
+      u.lang = chosen.lang;
+    } else {
+      // Never inherit the system locale silently.
+      u.lang = want;
+      if (missing) onState?.("error", text, `no ${base} voice installed: the system voice will be used`);
+    }
     u.rate = rate;
     u.onstart = () => onState?.("speaking", text);
     u.onend = () => onState?.("done", text);
