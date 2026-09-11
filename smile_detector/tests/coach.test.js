@@ -468,3 +468,40 @@ test("talkCoach: without a canSpeak it simply speaks", async () => {
   c.feed(0.1, 10);
   assert.deepEqual(spoken, [TALK_MORE]);
 });
+
+test("talkCoach: yielding to the other coach is not yielding to itself", async () => {
+  const { TalkCoach, TALK_MORE } = await import("../js/coach.js");
+  // the contract the app wires up: one voice, a gap only after somebody else
+  const GAP = 6;
+  let lastSpoke = { atS: -1e9, who: null };
+  const spoken = [];
+  const c = new TalkCoach({
+    firstS: 4, everyS: 4, retryS: 8,          // interval shorter than the gap, on purpose
+    canSpeak: t => lastSpoke.who === "talk" || t - lastSpoke.atS >= GAP,
+    speak: t => { spoken.push(t); },
+    nowS: 0,
+  });
+  // the app stamps who spoke at the moment the line is handed over
+  const tick = now => {
+    const before = spoken.length;
+    c.feed(0, now);
+    if (spoken.length > before) lastSpoke = { atS: now, who: "talk" };
+  };
+  for (let t = 0; t <= 40; t += 0.5) tick(t);
+  assert.equal(spoken.length, 10, `fell silent after ${spoken.length}: ${spoken.join(",")}`);
+  assert.ok(spoken.every(s => s === TALK_MORE));
+});
+
+test("talkCoach: the other coach speaking still pushes it back", async () => {
+  const { TalkCoach } = await import("../js/coach.js");
+  let lastSpoke = { atS: 10, who: "coach" };   // the smile coach just spoke
+  const spoken = [];
+  const c = new TalkCoach({
+    firstS: 10, everyS: 60, retryS: 8,
+    canSpeak: t => lastSpoke.who === "talk" || t - lastSpoke.atS >= 6,
+    speak: t => spoken.push(t), nowS: 0,
+  });
+  assert.equal(c.feed(0, 10), null, "spoke over the smile coach");
+  assert.deepEqual(spoken, []);
+  assert.ok(c.feed(0, 18), "never came back");
+});

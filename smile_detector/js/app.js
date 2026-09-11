@@ -103,7 +103,7 @@ const state = {
   pctPositive: 0,                // 0-100, positive.seconds / faceTime.seconds
   pctTalk: null,                 // 0-100 of elapsed spent talking, null without a transcriber
   talkCoach: null,               // TalkCoach while the talk verdicts are on
-  lastSpokeAtS: -1e9,            // when a line was last handed to the voice, to keep two coaches apart
+  lastSpoke: { atS: -1e9, who: null },  // who last handed a line to the voice, and when
 };
 
 const setStatus = msg => { ui.status.textContent = msg; };
@@ -676,7 +676,11 @@ function ensureSpeaker() {
     // asynchronously, and never at all when the browser refuses to speak, so a
     // coach asking "has anything just been said?" in the same frame would be
     // told no and talk over the line that was already on its way out.
-    state.speak = speak && (text => { state.lastSpokeAtS = performance.now() / 1000; return speak(text); });
+    // `who` matters: a coach must yield to the other one, never to itself.
+    state.speak = speak && ((text, who = "coach") => {
+      state.lastSpoke = { atS: performance.now() / 1000, who };
+      return speak(text);
+    });
   }
   return state.speak;
 }
@@ -879,9 +883,12 @@ async function initSpeech() {
       everyS: Math.max(5, parseFloat(ui.talkEvery?.value) || 60),
       threshold: Math.min(1, Math.max(0, (parseFloat(ui.talkThresh?.value) || 50) / 100)),
       nowS: performance.now() / 1000,
-      canSpeak: t => t - state.lastSpokeAtS >= VOICE_GAP_S,
+      // Yields to the smile coach, never to its own last line: measured against
+      // any speech at all, an interval shorter than the gap blocked every
+      // verdict it had just spoken, and the coach fell silent by degrees.
+      canSpeak: t => state.lastSpoke.who === "talk" || t - state.lastSpoke.atS >= VOICE_GAP_S,
       speak: text => {
-        if (ensureSpeaker()) state.speak(text);
+        if (ensureSpeaker()) state.speak(text, "talk");
       },
     });
     setTalkInfo(`on: first verdict in ${formatDuration(state.talkCoach.nextInS(performance.now() / 1000))}`);

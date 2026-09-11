@@ -182,7 +182,9 @@ session JSON.
   lines, where that one compares each round with the last and escalates through
   a list. "Talk more" repeated is a nudge; an escalating scolding about talking
   would be something else entirely. The two share one voice and keep six seconds
-  apart. The talk verdict is judged after the smile one and postponed rather
+  apart - the talk coach yielding to the smile coach, never to its own last
+  line: measured against any speech at all, an interval shorter than the gap
+  blocked every verdict it had itself just spoken, and it fell quiet by degrees. The talk verdict is judged after the smile one and postponed rather
   than dropped when the voice is busy: both default to the same cadence, so they
   come due in the same frame, and the one judged first would be cut off a
   syllable in - every time, which is how it went unheard. The gap is measured
