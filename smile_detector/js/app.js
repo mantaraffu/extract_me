@@ -56,6 +56,7 @@ const ui = {
   coach: $("coach"), coachFirst: $("coachFirst"), coachEvery: $("coachEvery"), coachThresh: $("coachThresh"), coachTest: $("coachTest"),
   speech: $("speech"), speechRec: $("speechRec"), speechText: $("speechText"),
   talk: $("talk"), talkFirst: $("talkFirst"), talkEvery: $("talkEvery"), talkThresh: $("talkThresh"),
+  talkTest: $("talkTest"), talkInfo: $("talkInfo"),
   speechModel: $("speechModel"), speechLib: $("speechLib"), speechInfo: $("speechInfo"),
   saveLog: $("saveLog"), saveNow: $("saveNow"), saveInfo: $("saveInfo"),
   stats: $("stats"), bars: $("bars"),
@@ -320,6 +321,10 @@ function processFrame(src) {
   if (state.talkCoach) {
     const verdict = state.talkCoach.feed(talkShare, nowS);
     if (verdict) console.log(`[talk] ${verdict.kind}: "${verdict.text}" talking=${(verdict.frac * 100).toFixed(1)}%`);
+    if (ui.talkInfo) {
+      ui.talkInfo.textContent = `next verdict in ${formatDuration(state.talkCoach.nextInS(nowS))}`
+        + (state.talkCoach.last ? ` · last: "${state.talkCoach.last.text}"` : "");
+    }
   }
 
   // --- session log: everything above, accumulated for the JSON on the Desktop ---
@@ -866,8 +871,9 @@ async function initSpeech() {
     syncTalkCoach();
   });
   for (const el of [ui.talkFirst, ui.talkEvery, ui.talkThresh]) el?.addEventListener("change", syncTalkCoach);
+  function setTalkInfo(t) { if (ui.talkInfo) ui.talkInfo.textContent = t; }
   function syncTalkCoach() {
-    if (!ui.talk?.checked) { state.talkCoach = null; state.dirty = true; return; }
+    if (!ui.talk?.checked) { state.talkCoach = null; setTalkInfo("off"); state.dirty = true; return; }
     state.talkCoach = new TalkCoach({
       firstS: Math.max(5, parseFloat(ui.talkFirst?.value) || 120),
       everyS: Math.max(5, parseFloat(ui.talkEvery?.value) || 60),
@@ -878,6 +884,7 @@ async function initSpeech() {
         if (ensureSpeaker()) state.speak(text);
       },
     });
+    setTalkInfo(`on: first verdict in ${formatDuration(state.talkCoach.nextInS(performance.now() / 1000))}`);
     state.dirty = true;
   }
 
@@ -886,6 +893,14 @@ async function initSpeech() {
     startListening();                      // recording implies wanting to listen
     syncRecording();
   });
+  // A verdict on demand, like the coach's "test voice": waiting two minutes to
+  // find out whether a switch does anything is how it goes unnoticed.
+  ui.talkTest?.addEventListener("click", () => {
+    if (!state.talkCoach) { setTalkInfo("switch the talk coach on first"); return; }
+    const v = state.talkCoach.check(state.pctTalk === null ? 0 : state.pctTalk / 100, performance.now() / 1000);
+    setTalkInfo(`said "${v.text}" at ${(v.frac * 100).toFixed(1)}% talking`);
+  });
+
   syncTalkCoach();
   if (!ui.speech?.checked) setSpeechInfo("switch speech on to start listening");
 }
